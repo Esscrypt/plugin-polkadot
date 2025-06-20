@@ -1,5 +1,10 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
+import {
+    elizaLogger,
+    ModelType,
+    composePromptFromState,
+    parseJSONObjectFromText,
+} from '@elizaos/core';
 import { z } from 'zod';
 import { PolkadotApiService } from '../services/api-service';
 
@@ -131,26 +136,35 @@ export const referendumDetailsTemplate = `Respond with a JSON markdown block con
 
 export async function buildGetReferendumDetailsRequest(
     runtime: IAgentRuntime,
-    message: Memory,
+    _message: Memory,
     state: State,
-): Promise<{ content: GetReferendumDetailsContent }> {
-    const currentState = state || (await runtime.composeState(message));
-
-    const context = composeContext({
-        state: currentState,
+): Promise<GetReferendumDetailsContent> {
+    const prompt = composePromptFromState({
+        state,
         template: referendumDetailsTemplate,
     });
 
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: referendumDetailsSchema as z.ZodTypeAny,
-        modelClass: ModelClass.MEDIUM,
-    });
+    const parsedResponse: GetReferendumDetailsContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        const parsedResponse = parseJSONObjectFromText(
+            response,
+        ) as GetReferendumDetailsContent | null;
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    const detailsData = result.object as GetReferendumDetailsContent;
+    //zod validate the response
+    const validatedResponse = referendumDetailsSchema.safeParse(parsedResponse);
 
-    return { content: detailsData };
+    if (!validatedResponse.success) {
+        throw new Error('Failed to extract a valid referendum ID from the message');
+    }
+
+    return validatedResponse.data as GetReferendumDetailsContent;
 }
 
 // Helper function to get track name from track ID
@@ -395,11 +409,7 @@ export default {
         elizaLogger.log('Starting GET_REFERENDUM_DETAILS action...');
 
         try {
-            const { content: detailsContent } = await buildGetReferendumDetailsRequest(
-                runtime,
-                message,
-                state,
-            );
+            const detailsContent = await buildGetReferendumDetailsRequest(runtime, message, state);
 
             elizaLogger.debug('detailsContent', detailsContent);
 
@@ -538,14 +548,14 @@ Queue Status: ${referendum.inQueue ? 'In queue' : 'Not in queue'}`;
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Show me details for referendum 586',
                     action: 'GET_REFERENDUM_DETAILS',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: '🏛️ Referendum 586 Details\n\nOverview:\n• Track: medium_spender (ID: 33)\n• Status: ONGOING\n• Origin: MediumSpender\n\nProposal:\n• Hash: 0xad649d315fe4c18ce3f9b9c09c698c0c860508cb3bcccdbce5adede355a26850\n• Length: 60 bytes\n• Enactment delay: 100 blocks\n\nTimeline:\n• Submitted at block: 26316166\n• Deciding since block: 26318566\n\n🗳️ Voting Results:\n• Ayes: 105.0 DOT (100%)\n• Nays: 0 DOT\n• Support: 35.0 DOT\n\nDeposits:\n• Submission: 1.0 DOT by 136byv85...n5Rz\n• Decision: 200.0 DOT by 136byv85...n5Rz\n\n⏰ Alarm: Set for block 26721700\n\nQueue Status: Not in queue',
                 },
@@ -553,14 +563,14 @@ Queue Status: ${referendum.inQueue ? 'In queue' : 'Not in queue'}`;
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Get referendum 500 info',
                     action: 'GET_REFERENDUM_DETAILS',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: '🏛️ Referendum 500 Details\n\nOverview:\n• Track: unknown (track info not preserved)\n• Status: APPROVED\n• Completed at block: 24567890\n\n💡 Note: This referendum has been completed. Detailed voting information and track data are not preserved on-chain for completed referenda.',
                 },
@@ -568,14 +578,14 @@ Queue Status: ${referendum.inQueue ? 'In queue' : 'Not in queue'}`;
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "What's the status of proposal 123?",
                     action: 'GET_REFERENDUM_DETAILS',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: '🏛️ Referendum 123 Details\n\nOverview:\n• Track: treasurer (ID: 11)\n• Status: ONGOING\n• Origin: Treasurer\n\nProposal:\n• Hash: 0x1234567890abcdef1234567890abcdef12345678\n• Length: 45 bytes\n• Enactment delay: 50 blocks\n\nTimeline:\n• Submitted at block: 26200000\n• Deciding since block: 26202000\n\n🗳️ Voting Results:\n• Ayes: 5,432.1 DOT (92%)\n• Nays: 456.7 DOT\n• Support: 1,234.5 DOT\n\nDeposits:\n• Submission: 10.0 DOT by 5GrwvaEF...Xb26\n• Decision: 100.0 DOT by 5GrwvaEF...Xb26\n\nQueue Status: Not in queue',
                 },

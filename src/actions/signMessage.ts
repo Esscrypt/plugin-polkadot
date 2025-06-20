@@ -1,5 +1,10 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
+import {
+    elizaLogger,
+    ModelType,
+    composePromptFromState,
+    parseJSONObjectFromText,
+} from '@elizaos/core';
 import { WalletProvider, initWalletProvider, WALLET_CACHE_KEY } from '../providers/wallet';
 import { stringToU8a, u8aToHex } from '@polkadot/util'; // For message and signature conversion
 import { z } from 'zod';
@@ -59,19 +64,30 @@ export async function buildSignMessageDetails(
     state: State,
 ): Promise<SignMessageContent> {
     const currentState = state || (await runtime.composeState(message));
-    const context = composeContext({
+    const prompt = composePromptFromState({
         state: currentState,
         template: signMessageTemplate,
     });
 
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: signMessageSchema as z.ZodTypeAny,
-        modelClass: ModelClass.SMALL,
-    });
+    const parsedResponse: SignMessageContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        const parsedResponse = parseJSONObjectFromText(response) as SignMessageContent | null;
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    return result.object as SignMessageContent;
+    //zod validate the response
+    const validatedResponse = signMessageSchema.safeParse(parsedResponse);
+
+    if (!validatedResponse.success) {
+        throw new Error('Failed to extract a valid message to sign from the message');
+    }
+
+    return validatedResponse.data as SignMessageContent;
 }
 
 export class SignMessageAction {
@@ -124,7 +140,7 @@ export class SignMessageAction {
             }
             // Get wallet number from cache
             const cache =
-                await targetWallet.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+                await targetWallet.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
             currentWalletNumber = cache?.wallets[walletAddress]?.number || null;
         }
 
@@ -215,14 +231,14 @@ export default {
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "Please sign the message 'hello world' with my Polkadot wallet.",
                     action: 'SIGN_POLKADOT_MESSAGE',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'Message signed successfully!\nSigner: 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb\nSignature: 0xabcd1234...',
                 },
@@ -230,14 +246,14 @@ export default {
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "Can you sign this for me: 'test message 123'",
                     action: 'SIGN_POLKADOT_MESSAGE',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'Message signed successfully!\nSigner: 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb\nSignature: 0xfedc9876...',
                 },

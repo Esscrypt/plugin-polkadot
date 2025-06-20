@@ -1,0 +1,9 @@
+{
+  "defaultRegistry": "elizaos-plugins/registry",
+  "publishConfig": {
+    "registry": "elizaos-plugins/registry",
+    "username": "mikirov",
+    "useNpm": false,
+    "platform": "node"
+  }
+}

@@ -1,4 +1,4 @@
-import type { IAgentRuntime, Memory, Provider, State } from '@elizaos/core';
+import type { IAgentRuntime, Memory, Provider, ProviderResult, State } from '@elizaos/core';
 import { elizaLogger } from '@elizaos/core';
 import { PolkadotApiService } from '../services/api-service';
 
@@ -151,7 +151,8 @@ class ChainDataService {
 }
 
 export const networkDataProvider: Provider = {
-    async get(_runtime: IAgentRuntime, _message: Memory, _state?: State): Promise<string | null> {
+    name: 'NETWORK_DATA_PROVIDER',
+    async get(_runtime: IAgentRuntime, _message: Memory, _state?: State): Promise<ProviderResult> {
         try {
             const chainDataService = new ChainDataService();
             await chainDataService.initialize(_runtime);
@@ -174,12 +175,22 @@ export const networkDataProvider: Provider = {
             }
 
             elizaLogger.info('Network Data Provider output generated', output);
-            return output;
+            return {
+                text: output,
+                data: {
+                    networkInfo: chainInfo,
+                },
+            };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             elizaLogger.error(`Error in Network Data Provider: ${message}`);
 
-            return 'Network Data Provider: Unable to retrieve current network status.';
+            return {
+                text: 'Network Data Provider: Unable to retrieve current network status.',
+                data: {
+                    error: message,
+                },
+            };
         }
     },
 };

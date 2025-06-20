@@ -1,7 +1,27 @@
-import type { IAgentRuntime, ICacheManager } from '@elizaos/core';
+import type { IAgentRuntime } from '@elizaos/core';
 import { elizaLogger } from '@elizaos/core';
 import BigNumber from 'bignumber.js';
 import { PROVIDER_CONFIG } from '../providers/wallet';
+
+export class MemoryCacheAdapter {
+    data: Map<string, string>;
+
+    constructor(initalData?: Map<string, string>) {
+        this.data = initalData ?? new Map<string, string>();
+    }
+
+    async get(key: string): Promise<string | undefined> {
+        return this.data.get(key);
+    }
+
+    async set(key: string, value: string): Promise<void> {
+        this.data.set(key, value);
+    }
+
+    async delete(key: string): Promise<void> {
+        this.data.delete(key);
+    }
+}
 
 export interface WalletPortfolio {
     totalUsd: string;
@@ -9,12 +29,12 @@ export interface WalletPortfolio {
 }
 
 export async function fetchPrices(
-    cacheManager: ICacheManager,
+    runtime: IAgentRuntime,
     coinMarketCapApiKey: string,
 ): Promise<{ nativeToken: { usd: BigNumber } }> {
     try {
         const cacheKey = 'prices';
-        const cachedValue = await cacheManager.get<{ nativeToken: { usd: BigNumber } }>(cacheKey);
+        const cachedValue = await runtime.getCache<{ nativeToken: { usd: BigNumber } }>(cacheKey);
 
         if (cachedValue) {
             elizaLogger.log('Cache hit for fetchPrices');
@@ -48,7 +68,7 @@ export async function fetchPrices(
                     const prices = {
                         nativeToken: { usd: new BigNumber(price.price) },
                     };
-                    cacheManager.set(cacheKey, prices);
+                    runtime.setCache(cacheKey, prices);
                     return prices;
                 }
                 throw new Error('Price data not found in CoinMarketCap response structure.');
@@ -91,13 +111,13 @@ export function formatPortfolio(
 }
 
 export async function fetchPortfolioValue(
-    cacheManager: ICacheManager,
+    runtime: IAgentRuntime,
     coinMarketCapApiKey: string,
     walletAddress: string,
 ): Promise<WalletPortfolio> {
     try {
         const cacheKey = `portfolio-${walletAddress}`;
-        const cachedValue = await cacheManager.get<WalletPortfolio>(cacheKey);
+        const cachedValue = await runtime.getCache<WalletPortfolio>(cacheKey);
 
         if (cachedValue) {
             elizaLogger.log('Cache hit for fetchPortfolioValue', cachedValue);
@@ -105,7 +125,7 @@ export async function fetchPortfolioValue(
         }
         elizaLogger.log('Cache miss for fetchPortfolioValue');
 
-        const prices = await fetchPrices(cacheManager, coinMarketCapApiKey);
+        const prices = await fetchPrices(runtime, coinMarketCapApiKey);
         const nativeTokenBalance = BigInt(0);
         const amount = Number(nativeTokenBalance) / Number(PROVIDER_CONFIG.NATIVE_TOKEN_DECIMALS);
         const totalUsd = new BigNumber(amount.toString()).times(prices.nativeToken.usd);
@@ -115,7 +135,7 @@ export async function fetchPortfolioValue(
             totalNativeToken: amount.toFixed(4).toString(),
         };
 
-        cacheManager.set(cacheKey, portfolio);
+        runtime.setCache(cacheKey, portfolio);
         return portfolio;
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -126,16 +146,11 @@ export async function fetchPortfolioValue(
 
 export async function getFormattedPortfolio(
     runtime: IAgentRuntime,
-    cacheManager: ICacheManager,
     coinMarketCapApiKey: string,
     walletAddress: string,
 ): Promise<string> {
     try {
-        const portfolio = await fetchPortfolioValue(
-            cacheManager,
-            coinMarketCapApiKey,
-            walletAddress,
-        );
+        const portfolio = await fetchPortfolioValue(runtime, coinMarketCapApiKey, walletAddress);
         return formatPortfolio(runtime, portfolio, walletAddress);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

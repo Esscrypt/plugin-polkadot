@@ -6,11 +6,9 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { PROVIDER_CONFIG, WALLET_CACHE_KEY } from '../providers/wallet';
 import { ValidateAction } from '../actions/validateSignature';
-import { CacheManager, MemoryCacheAdapter } from '@elizaos/core';
-import { CONFIG_KEYS } from '../enviroment';
+import { CacheManager } from '../utils/cache';
 
-// Create a real cache manager instance
-const cacheManager = new CacheManager(new MemoryCacheAdapter());
+const cacheManager = new CacheManager();
 
 describe('ValidateAction', () => {
     let mockRuntime: IAgentRuntime;
@@ -24,9 +22,6 @@ describe('ValidateAction', () => {
     beforeEach(async () => {
         // Reset all mocks
         vi.clearAllMocks();
-
-        // Set environment variable to use cache manager
-        process.env[CONFIG_KEYS.USE_CACHE_MANAGER] = 'true';
 
         // Create a temporary test directory
         testBackupDir = path.join(process.cwd(), 'validate_signature_test_wallet_backups');
@@ -45,7 +40,12 @@ describe('ValidateAction', () => {
         // Create mock runtime with real cache manager
         mockRuntime = {
             character: { name: 'TestAgent' },
-            cacheManager: cacheManager,
+            getCache: vi.fn().mockImplementation((key: string) => {
+                return cacheManager.get(key);
+            }),
+            setCache: vi.fn().mockImplementation((key: string, value: unknown) => {
+                cacheManager.set(key, value);
+            }),
             getSetting: vi.fn().mockImplementation((key: string) => {
                 if (key === 'COINMARKETCAP_API_KEY') return 'test_cmc_key';
                 return null;
@@ -70,9 +70,6 @@ describe('ValidateAction', () => {
     });
 
     afterEach(async () => {
-        // Reset environment variable
-        delete process.env[CONFIG_KEYS.USE_CACHE_MANAGER];
-
         // Clear all wallets from cache
         await WalletProvider.clearAllWalletsFromCache(walletProvider);
 

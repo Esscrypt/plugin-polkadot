@@ -38,6 +38,7 @@ export COINMARKETCAP_API_KEY="your_coinmarketcap_api_key"
 # bash ./packages/plugin-polkadot/scripts/debug.sh
 ```
 
+<<<<<<< HEAD
 ## Getting Started
 
 ### New to ElizaOS
@@ -47,16 +48,20 @@ To test this plugin with ElizaOS from scratch, follow these steps:
 1. Clone the ElizaOS monorepo: https://github.com/elizaOS/eliza
 2. Inside packages, clone the polkadot-plugin repo: https://github.com/Esscrypt/plugin-polkadot
 3. Inside the characters folder, link the plugin. example character file: https://gist.github.com/mikirov/74ec0c51255050562b2bdd63ccfc36fb
-4. Follow install and build instructions: `pnpm install --no-frozen-lockfile && pnpm build`
-5. Start WEB UI: `pnpm start:client`
-6. Start Agent: `pnpm start --characters="characters/dobby.character.json"`
-7. (Optional) set .env with **POLKADOT_PRIVATE_KEY** and **POLKADOT_RPC_URL**
+4. Inside agent folder, add `"@elizaos/plugin-polkadot": "workspace:*"` to the dependencies section in package.json
+5. Follow install and build instructions: `pnpm install --no-frozen-lockfile && pnpm build`
+6. Start WEB UI: `pnpm start:client`
+7. Start Agent: `pnpm start --characters="characters/dobby.character.json"`
+8. (Optional) set .env with **POLKADOT_PRIVATE_KEY** and **POLKADOT_RPC_URL**
 
-> **Note:** When starting the Agent, if **POLKADOT_PRIVATE_KEY** is not set, an error will pop up, but the agent will still run and expect a wallet to get created by the user
+> Note: When starting the Agent, if **POLKADOT_PRIVATE_KEY** is not set, an error will pop up, but the agent will still run and expect a wallet to get created by the user
 
-8. Go to http://localhost:5173/ and interact with the agent.
+9. Go to [http://localhost:5173/](http://localhost:5173/) and interact with the agent.
 
 ### Existing ElizaOS Users
+=======
+## Installation
+>>>>>>> 7d41f01 (Initial commit from ElizaOS CLI)
 
 ```bash
 npm install @elizaos/plugin-polkadot
@@ -312,4 +317,8 @@ For more information about Polkadot:
 
 ## License
 
+<<<<<<< HEAD
 This plugin is part of the Eliza project. See the main project repository for license information.
+=======
+This plugin is part of the Eliza project. See the main project repository for license information.
+>>>>>>> 7d41f01 (Initial commit from ElizaOS CLI)

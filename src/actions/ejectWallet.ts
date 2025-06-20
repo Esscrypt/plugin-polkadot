@@ -1,5 +1,10 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
+import {
+    elizaLogger,
+    ModelType,
+    composePromptFromState,
+    parseJSONObjectFromText,
+} from '@elizaos/core';
 import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import { z } from 'zod';
 
@@ -50,23 +55,33 @@ Respond with a JSON markdown block containing only the extracted values`;
  */
 export async function buildEjectWalletDetails(
     runtime: IAgentRuntime,
-    message: Memory,
+    _message: Memory,
     state: State,
 ): Promise<EjectWalletContent> {
-    const currentState = state || (await runtime.composeState(message));
-    const context = composeContext({
-        state: currentState,
+    const prompt = composePromptFromState({
+        state,
         template: ejectWalletTemplate,
     });
 
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: ejectWalletSchema as z.ZodTypeAny,
-        modelClass: ModelClass.SMALL,
-    });
+    const parsedResponse: EjectWalletContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        const parsedResponse = parseJSONObjectFromText(response) as EjectWalletContent | null;
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    return result.object as EjectWalletContent;
+    //zod validate the response
+    const validatedResponse = ejectWalletSchema.safeParse(parsedResponse);
+
+    if (!validatedResponse.success) {
+        throw new Error('Failed to extract a valid Polkadot address from the message');
+    }
+
+    return validatedResponse.data as EjectWalletContent;
 }
 
 export default {
@@ -190,14 +205,14 @@ Please store it securely.`,
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Please eject my Polkadot wallet #1 with password my_password',
                     action: 'EJECT_POLKADOT_WALLET',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'Wallet ejected successfully. Your Decrypted mnemonic is: mnemonic. Please store it securely.',
                 },
@@ -205,14 +220,14 @@ Please store it securely.`,
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Please eject my Polkadot wallet with address 1234567890 and password my_password',
                     action: 'EJECT_POLKADOT_WALLET',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'Wallet ejected successfully. Your Decrypted mnemonic is: mnemonic. Please store it securely.',
                 },

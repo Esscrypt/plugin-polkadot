@@ -4,10 +4,9 @@ import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { PROVIDER_CONFIG } from '../providers/wallet';
-import { CONFIG_KEYS } from '../enviroment';
-import { CacheManager, MemoryCacheAdapter } from '@elizaos/core';
+import { CacheManager } from '../utils/cache';
 
-const cacheManager = new CacheManager(new MemoryCacheAdapter());
+const cacheManager = new CacheManager();
 
 describe('LoadWallet', () => {
     let mockRuntime: IAgentRuntime;
@@ -19,9 +18,6 @@ describe('LoadWallet', () => {
     beforeEach(async () => {
         // Reset all mocks
         vi.clearAllMocks();
-
-        // Set environment variable to use mock cache manager
-        process.env[CONFIG_KEYS.USE_CACHE_MANAGER] = 'true';
 
         // Create a temporary test directory
         testBackupDir = path.join(process.cwd(), 'load_wallet_test_wallet_backups');
@@ -40,7 +36,12 @@ describe('LoadWallet', () => {
         // Create mock runtime
         mockRuntime = {
             character: { name: 'TestAgent' },
-            cacheManager,
+            getCache: vi.fn().mockImplementation((key: string) => {
+                return cacheManager.get(key);
+            }),
+            setCache: vi.fn().mockImplementation((key: string, value: unknown) => {
+                cacheManager.set(key, value);
+            }),
             getSetting: vi.fn().mockImplementation((key: string) => {
                 if (key === 'COINMARKETCAP_API_KEY') return 'test_cmc_key';
                 return null;
@@ -66,8 +67,6 @@ describe('LoadWallet', () => {
         if (fs.existsSync(testBackupDir)) {
             fs.rmSync(testBackupDir, { recursive: true, force: true });
         }
-        // Reset environment variable
-        delete process.env[CONFIG_KEYS.USE_CACHE_MANAGER];
     });
 
     describe('Load by Wallet Number', () => {

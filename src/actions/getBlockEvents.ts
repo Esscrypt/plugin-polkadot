@@ -1,7 +1,12 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
-import { z } from 'zod';
+import {
+    elizaLogger,
+    ModelType,
+    composePromptFromState,
+    parseJSONObjectFromText,
+} from '@elizaos/core';
 import { PolkadotApiService } from '../services/api-service';
+import { z } from 'zod';
 
 export interface GetBlockEventsContent extends Content {
     blockNumberOrHash: string;
@@ -98,30 +103,35 @@ export const blockEventsTemplate = `Respond with a JSON markdown block containin
 
 export async function buildGetBlockEventsDetails(
     runtime: IAgentRuntime,
-    message: Memory,
+    _message: Memory,
     state: State,
-): Promise<{ content: GetBlockEventsContent }> {
-    const currentState = state || (await runtime.composeState(message));
-
-    const context = composeContext({
-        state: currentState,
+): Promise<GetBlockEventsContent> {
+    //compose the prompt
+    const prompt = composePromptFromState({
+        state,
         template: blockEventsTemplate,
     });
 
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: blockEventsSchema as z.ZodTypeAny,
-        modelClass: ModelClass.MEDIUM,
-    });
+    //use the model to get the response
+    const parsedResponse: GetBlockEventsContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        const parsedResponse = parseJSONObjectFromText(response) as GetBlockEventsContent | null;
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    const blockEventsData = result.object as GetBlockEventsContent;
+    //zod validate the response
+    const validatedResponse = blockEventsSchema.safeParse(parsedResponse);
 
-    if (!blockEventsData || !blockEventsData.blockNumberOrHash) {
+    if (!validatedResponse.success) {
         throw new Error('Failed to extract a valid block number or hash from the message');
     }
 
-    return { content: blockEventsData };
+    return validatedResponse.data as GetBlockEventsContent;
 }
 
 // Helper function to create a readable summary for different event types
@@ -307,11 +317,7 @@ export default {
         elizaLogger.log('Starting GET_BLOCK_EVENTS action...');
 
         try {
-            const { content: getBlockEventsContent } = await buildGetBlockEventsDetails(
-                runtime,
-                message,
-                state,
-            );
+            const getBlockEventsContent = await buildGetBlockEventsDetails(runtime, message, state);
 
             elizaLogger.debug('getBlockEventsContent', getBlockEventsContent);
 
@@ -409,14 +415,14 @@ ${
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'What events happened in block 12345678?',
                     action: 'GET_BLOCK_EVENTS',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: '📦 Block Events for Block 12345678\nHash: 0x8d7c0cce1768da5c...\n\nSummary:\n• Total Events: 8\n• Filtered Events: 8 (showing first 5)\n\nEvents:\n1. system.ExtrinsicSuccess (Extrinsic 1)\n   └─ Extrinsic executed successfully\n\n2. balances.Transfer (Extrinsic 2)\n   └─ 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY → 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty (10000000000 units)\n\n3. system.ExtrinsicSuccess (Extrinsic 2)\n   └─ Extrinsic executed successfully\n\n4. treasury.Deposit (Finalization)\n   └─ Treasury deposit: 1000000000 units\n\n5. balances.Deposit (Finalization)\n   └─ 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY (+500000000 units)\n\n📋 3 more events available. Use a higher limit to see more.',
                 },
@@ -424,14 +430,14 @@ ${
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Show me only the balances events from block 0x8d7c0cce1768da5c1725def400ce1a337369cbba4c4844d6f9b8bab255c9bb07',
                     action: 'GET_BLOCK_EVENTS',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: '📦 Block Events for Block 12345678\nHash: 0x8d7c0cce1768da5c...\n\nSummary:\n• Total Events: 8\n• Filtered Events: 3\nFilter: balances module events only\n\nEvents:\n1. balances.Transfer (Extrinsic 2)\n   └─ 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY → 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty (10000000000 units)\n\n2. balances.Deposit (Finalization)\n   └─ 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY (+500000000 units)\n\n3. balances.Reserved (Finalization)\n   └─ 2 data items',
                 },
@@ -439,14 +445,14 @@ ${
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Get the first 3 events from block 12345678',
                     action: 'GET_BLOCK_EVENTS',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: '📦 Block Events for Block 12345678\nHash: 0x8d7c0cce1768da5c...\n\nSummary:\n• Total Events: 8\n• Filtered Events: 8 (showing first 3)\n\nEvents:\n1. system.ExtrinsicSuccess (Extrinsic 1)\n   └─ Extrinsic executed successfully\n\n2. balances.Transfer (Extrinsic 2)\n   └─ 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY → 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty (10000000000 units)\n\n3. system.ExtrinsicSuccess (Extrinsic 2)\n   └─ Extrinsic executed successfully\n\n📋 5 more events available. Use a higher limit to see more.',
                 },

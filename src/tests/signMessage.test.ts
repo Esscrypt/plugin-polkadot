@@ -7,9 +7,9 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { PROVIDER_CONFIG } from '../providers/wallet';
 import { SignMessageAction } from '../actions/signMessage';
-import { CacheManager, MemoryCacheAdapter } from '@elizaos/core';
+import { CacheManager } from '../utils/cache';
 
-const cacheManager = new CacheManager(new MemoryCacheAdapter());
+const cacheManager = new CacheManager();
 
 describe('SignMessage', () => {
     let mockRuntime: IAgentRuntime;
@@ -43,7 +43,12 @@ describe('SignMessage', () => {
         // Create mock runtime
         mockRuntime = {
             character: { name: 'TestAgent' },
-            cacheManager,
+            getCache: vi.fn().mockImplementation((key: string) => {
+                return cacheManager.get(key);
+            }),
+            setCache: vi.fn().mockImplementation((key: string, value: unknown) => {
+                cacheManager.set(key, value);
+            }),
             getSetting: vi.fn().mockImplementation((key: string) => {
                 if (key === 'COINMARKETCAP_API_KEY') return 'test_cmc_key';
                 return null;

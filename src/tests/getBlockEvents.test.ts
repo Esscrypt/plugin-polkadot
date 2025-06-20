@@ -2,7 +2,9 @@ import type { IAgentRuntime } from '@elizaos/core';
 import { describe, it, vi, beforeEach, expect } from 'vitest';
 import { GetBlockEventsAction } from '../actions/getBlockEvents';
 import { PolkadotApiService } from '../services/api-service';
-import { CacheManager, MemoryCacheAdapter } from '@elizaos/core';
+import { CacheManager } from '../utils/cache';
+
+const cacheManager = new CacheManager();
 
 const POLKADOT_RPC_URL = 'wss://rpc.polkadot.io';
 
@@ -29,7 +31,12 @@ describe('GetBlockEventsAction', () => {
 
         mockRuntime = {
             character: { name: 'TestAgent' },
-            cacheManager: new CacheManager(new MemoryCacheAdapter()),
+            getCache: vi.fn().mockImplementation((key: string) => {
+                return cacheManager.get(key);
+            }),
+            setCache: vi.fn().mockImplementation((key: string, value: unknown) => {
+                cacheManager.set(key, value);
+            }),
             getSetting: vi.fn().mockImplementation((param) => {
                 if (param === 'POLKADOT_RPC_URL') {
                     return POLKADOT_RPC_URL;

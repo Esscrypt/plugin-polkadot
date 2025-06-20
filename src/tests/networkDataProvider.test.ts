@@ -2,7 +2,7 @@ import type { IAgentRuntime, Memory, State } from '@elizaos/core';
 import { describe, it, vi, beforeEach, expect, afterEach } from 'vitest';
 import networkDataProvider from '../providers/networkData';
 import { PolkadotApiService } from '../services/api-service';
-import { CacheManager, MemoryCacheAdapter } from '@elizaos/core';
+import { CacheManager } from '../utils/cache';
 
 const POLKADOT_RPC_URL = 'wss://rpc.polkadot.io';
 
@@ -11,13 +11,18 @@ describe('Network Data Provider', () => {
     let apiService: PolkadotApiService;
     let mockMessage: Memory;
     let mockState: State;
-
+    const cacheManager = new CacheManager();
     beforeEach(async () => {
         vi.clearAllMocks();
 
         mockRuntime = {
             character: { name: 'TestAgent' },
-            cacheManager: new CacheManager(new MemoryCacheAdapter()),
+            getCache: vi.fn().mockImplementation((key: string) => {
+                return cacheManager.get(key);
+            }),
+            setCache: vi.fn().mockImplementation((key: string, value: unknown) => {
+                cacheManager.set(key, value);
+            }),
             getSetting: vi.fn().mockImplementation((param) => {
                 if (param === 'POLKADOT_RPC_URL') {
                     return POLKADOT_RPC_URL;
@@ -45,49 +50,49 @@ describe('Network Data Provider', () => {
         it('should fetch and return network status information', async () => {
             const result = await networkDataProvider.get(mockRuntime, mockMessage, mockState);
 
-            expect(typeof result).toBe('string');
-            expect(result.length).toBeGreaterThan(0);
+            expect(typeof result.text).toBe('string');
+            expect(result.text.length).toBeGreaterThan(0);
 
-            expect(result).toMatch(/Network Status.*:/);
-            expect(result).toContain('Network:');
-            expect(result).toContain('Connected:');
-            expect(result).toContain('Synced:');
-            expect(result).toContain('Latest Block:');
-            expect(result).toContain('Native Token:');
+            expect(result.text).toMatch(/Network Status.*:/);
+            expect(result.text).toContain('Network:');
+            expect(result.text).toContain('Connected:');
+            expect(result.text).toContain('Synced:');
+            expect(result.text).toContain('Latest Block:');
+            expect(result.text).toContain('Native Token:');
         });
 
         it('should include real network details', async () => {
             const result = await networkDataProvider.get(mockRuntime, mockMessage, mockState);
 
             // Should contain realistic network values
-            expect(result).toMatch(/Network: \w+/); // Network name
-            expect(result).toMatch(/Connected: (Yes|No) \(\d+ peers\)/); // Peer count
-            expect(result).toMatch(/Synced: (Yes|No)/); // Sync status
-            expect(result).toMatch(/Latest Block: #\d+/); // Block number
-            expect(result).toMatch(/Native Token: [A-Z]+/); // Token symbol
+            expect(result.text).toMatch(/Network: \w+/); // Network name
+            expect(result.text).toMatch(/Connected: (Yes|No) \(\d+ peers\)/); // Peer count
+            expect(result.text).toMatch(/Synced: (Yes|No)/); // Sync status
+            expect(result.text).toMatch(/Latest Block: #\d+/); // Block number
+            expect(result.text).toMatch(/Native Token: [A-Z]+/); // Token symbol
         });
 
         it('should include timestamp information', async () => {
             const result = await networkDataProvider.get(mockRuntime, mockMessage, mockState);
 
-            expect(result).toMatch(/updated \d+s ago/);
+            expect(result.text).toMatch(/updated \d+s ago/);
         });
 
         it('should handle optional network components', async () => {
             const result = await networkDataProvider.get(mockRuntime, mockMessage, mockState);
 
-            if (result.includes('Active Validators:')) {
-                expect(result).toMatch(/Active Validators: \d+/);
+            if (result.text.includes('Active Validators:')) {
+                expect(result.text).toMatch(/Active Validators: \d+/);
             }
-            if (result.includes('Connected Parachains:')) {
-                expect(result).toMatch(/Connected Parachains: \d+/);
+            if (result.text.includes('Connected Parachains:')) {
+                expect(result.text).toMatch(/Connected Parachains: \d+/);
             }
         });
 
         it('should format output consistently', async () => {
             const result = await networkDataProvider.get(mockRuntime, mockMessage, mockState);
 
-            const lines = result.split('\n');
+            const lines = result.text.split('\n');
             expect(lines.length).toBeGreaterThan(1);
 
             expect(lines[0]).toMatch(/Network Status.*:/);
@@ -119,8 +124,8 @@ describe('Network Data Provider', () => {
             const result = await networkDataProvider.get(badRuntime, mockMessage, mockState);
 
             // Should return an error message rather than throwing
-            expect(typeof result).toBe('string');
-            expect(result).toContain('Unable to retrieve current network status');
+            expect(typeof result.text).toBe('string');
+            expect(result.text).toContain('Unable to retrieve current network status');
         });
     });
 });

@@ -1,5 +1,10 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
+import {
+    elizaLogger,
+    ModelType,
+    composePromptFromState,
+    parseJSONObjectFromText,
+} from '@elizaos/core';
 import { z } from 'zod';
 import { formatBalance } from '@polkadot/util';
 import { PolkadotApiService } from '../services/api-service';
@@ -8,7 +13,7 @@ export interface GetBalanceContent extends Content {
     address: string;
 }
 
-export const addressSchema = z.object({
+export const getBalanceSchema = z.object({
     address: z.string().min(1, 'Address is required'),
 });
 
@@ -26,30 +31,33 @@ export const addressTemplate = `Respond with a JSON markdown block containing on
 
 export async function buildGetBalanceDetails(
     runtime: IAgentRuntime,
-    message: Memory,
+    _message: Memory,
     state: State,
-): Promise<{ content: GetBalanceContent }> {
-    const currentState = state || (await runtime.composeState(message));
-
-    const context = composeContext({
-        state: currentState,
+): Promise<GetBalanceContent> {
+    const prompt = composePromptFromState({
+        state,
         template: addressTemplate,
     });
 
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: addressSchema as z.ZodTypeAny,
-        modelClass: ModelClass.MEDIUM,
-    });
+    const parsedResponse: GetBalanceContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        const parsedResponse = parseJSONObjectFromText(response) as GetBalanceContent | null;
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    const addressData = result.object as GetBalanceContent;
+    //zod validate the response
+    const validatedResponse = getBalanceSchema.safeParse(parsedResponse);
 
-    if (!addressData || !addressData.address) {
+    if (!validatedResponse.success) {
         throw new Error('Failed to extract a valid Polkadot address from the message');
     }
 
-    return { content: addressData };
+    return validatedResponse.data as GetBalanceContent;
 }
 
 export class GetBalanceAction {
@@ -158,11 +166,7 @@ export default {
         elizaLogger.log('Starting GET_POLKADOT_BALANCE action...');
 
         try {
-            const { content: getBalanceContent } = await buildGetBalanceDetails(
-                runtime,
-                message,
-                state,
-            );
+            const getBalanceContent = await buildGetBalanceDetails(runtime, message, state);
 
             elizaLogger.debug('getBalanceContent', getBalanceContent);
 
@@ -227,14 +231,14 @@ Note: Free balance is the amount available for transfers and transactions. Reser
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'What is the balance of 15JRT5GjLAZkuvmpwmjCUp1RRLr7Y6Gnusz37ia37h2Xn5Rz?',
                     action: 'GET_POLKADOT_BALANCE',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Balance Information for: 15JRT5GjLAZkuvmpwmjCUp1RRLr7Y6Gnusz37ia37h2Xn5Rz\n\nFree Balance: 10.5000 DOT\nReserved Balance: 0.0000 DOT\nTotal Balance: 10.5000 DOT\n\nNote: Free balance is the amount available for transfers and transactions. Reserved balance is locked for various on-chain activities.',
                 },
@@ -242,14 +246,14 @@ Note: Free balance is the amount available for transfers and transactions. Reser
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Check the DOT balance in this address: 15JRT5GjLAZkuvmpwmjCUp1RRLr7Y6Gnusz37ia37h2Xn5Rz',
                     action: 'GET_POLKADOT_BALANCE',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Balance Information for: 15JRT5GjLAZkuvmpwmjCUp1RRLr7Y6Gnusz37ia37h2Xn5Rz\n\nFree Balance: 10.5000 DOT\nReserved Balance: 0.0000 DOT\nTotal Balance: 10.5000 DOT\n\nNote: Free balance is the amount available for transfers and transactions. Reserved balance is locked for various on-chain activities.',
                 },

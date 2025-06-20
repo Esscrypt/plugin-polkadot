@@ -1,5 +1,10 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
+import {
+    elizaLogger,
+    ModelType,
+    composePromptFromState,
+    parseJSONObjectFromText,
+} from '@elizaos/core';
 import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import { z } from 'zod';
 
@@ -56,19 +61,30 @@ export async function buildLoadWalletDetails(
     state: State,
 ): Promise<LoadWalletContent> {
     const currentState = state || (await runtime.composeState(message));
-    const context = composeContext({
+    const prompt = composePromptFromState({
         state: currentState,
         template: loadWalletTemplate,
     });
 
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: loadWalletSchema as z.ZodTypeAny,
-        modelClass: ModelClass.SMALL,
-    });
+    const parsedResponse: LoadWalletContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        const parsedResponse = parseJSONObjectFromText(response) as LoadWalletContent | null;
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    return result.object as LoadWalletContent;
+    //zod validate the response
+    const validatedResponse = loadWalletSchema.safeParse(parsedResponse);
+
+    if (!validatedResponse.success) {
+        throw new Error('Failed to extract a valid wallet number or address from the message');
+    }
+
+    return parsedResponse;
 }
 
 export default {
@@ -175,14 +191,14 @@ export default {
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Please load my Polkadot wallet #1 with password my_password',
                     action: 'LOAD_POLKADOT_WALLET',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'Wallet loaded successfully!\nWallet #1\nAddress: 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb\n\nThe wallet is now ready for use.',
                 },
@@ -190,14 +206,14 @@ export default {
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Please load my Polkadot wallet with address 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb and password my_password',
                     action: 'LOAD_POLKADOT_WALLET',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'Wallet loaded successfully!\nWallet #1\nAddress: 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb\n\nThe wallet is now ready for use.',
                 },
