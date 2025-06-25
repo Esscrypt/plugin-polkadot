@@ -4,3 +4,5 @@ node_modules
 test_wallet_backups/
 
 lib
+
+.env

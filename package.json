@@ -5,6 +5,10 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/esscrypt/plugin-polkadot.git"
+  },
   "exports": {
     "./package.json": "./package.json",
     ".": {
