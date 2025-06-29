@@ -21,7 +21,8 @@
         "noEmitOnError": false,
         "moduleDetection": "force",
         "allowArbitraryExtensions": true,
-        "customConditions": ["@elizaos/source"]
+        "customConditions": ["@elizaos/source"],
+        "baseUrl": ".",
     },
     "exclude": ["node_modules", "dist", "src/**/*.d.ts", "types/**/*.test.ts"],
     "include": ["src"]

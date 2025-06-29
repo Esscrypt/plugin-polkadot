@@ -1,5 +1,10 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
+import {
+    elizaLogger,
+    ModelType,
+    composePromptFromState,
+    parseJSONObjectFromText,
+} from '@elizaos/core';
 import { z } from 'zod';
 import { PolkadotApiService } from '../services/api-service';
 
@@ -115,26 +120,33 @@ export const referendaTemplate = `Respond with a JSON markdown block containing 
 
 export async function buildGetReferendaDetails(
     runtime: IAgentRuntime,
-    message: Memory,
+    _message: Memory,
     state: State,
-): Promise<{ content: GetReferendaContent }> {
-    const currentState = state || (await runtime.composeState(message));
-
-    const context = composeContext({
-        state: currentState,
+): Promise<GetReferendaContent> {
+    const prompt = composePromptFromState({
+        state,
         template: referendaTemplate,
     });
 
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: referendaSchema as z.ZodTypeAny,
-        modelClass: ModelClass.MEDIUM,
-    });
+    const parsedResponse: GetReferendaContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        const parsedResponse = parseJSONObjectFromText(response) as GetReferendaContent | null;
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    const referendaData = result.object as GetReferendaContent;
+    //zod validate the response
+    const validatedResponse = referendaSchema.safeParse(parsedResponse);
 
-    return { content: referendaData };
+    if (!validatedResponse.success) {
+        throw new Error('Failed to extract a valid number of referenda from the message');
+    }
+
+    return validatedResponse.data as GetReferendaContent;
 }
 
 // Helper function to get track name from track ID
@@ -341,11 +353,7 @@ export default {
         elizaLogger.log('Starting GET_REFERENDA action...');
 
         try {
-            const { content: getReferendaContent } = await buildGetReferendaDetails(
-                runtime,
-                message,
-                state,
-            );
+            const getReferendaContent = await buildGetReferendaDetails(runtime, message, state);
 
             elizaLogger.debug('getReferendaContent', getReferendaContent);
 
@@ -428,14 +436,14 @@ ${
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'What are the current governance referenda?',
                     action: 'GET_REFERENDA',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "Here's a list of current ongoing referenda...",
                 },
@@ -443,14 +451,14 @@ ${
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Show me the last 5 governance proposals',
                     action: 'GET_REFERENDA',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "Here's a list of the 5 latest referenda...",
                 },
@@ -458,14 +466,14 @@ ${
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Get me 20 referenda',
                     action: 'GET_REFERENDA',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "Here's a list of the last 20 referenda...",
                 },

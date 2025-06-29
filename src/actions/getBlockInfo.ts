@@ -1,5 +1,10 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
+import {
+    elizaLogger,
+    ModelType,
+    composePromptFromState,
+    parseJSONObjectFromText,
+} from '@elizaos/core';
 import { z } from 'zod';
 import { PolkadotApiService } from '../services/api-service';
 
@@ -52,30 +57,33 @@ export const blockInfoTemplate = `Respond with a JSON markdown block containing 
 
 export async function buildGetBlockInfoDetails(
     runtime: IAgentRuntime,
-    message: Memory,
+    _message: Memory,
     state: State,
-): Promise<{ content: GetBlockInfoContent }> {
-    const currentState = state || (await runtime.composeState(message));
-
-    const context = composeContext({
-        state: currentState,
+): Promise<GetBlockInfoContent> {
+    const prompt = composePromptFromState({
+        state,
         template: blockInfoTemplate,
     });
 
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: blockInfoSchema as z.ZodTypeAny,
-        modelClass: ModelClass.MEDIUM,
-    });
+    const parsedResponse: GetBlockInfoContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        const parsedResponse = parseJSONObjectFromText(response) as GetBlockInfoContent | null;
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    const blockData = result.object as GetBlockInfoContent;
+    //zod validate the response
+    const validatedResponse = blockInfoSchema.safeParse(parsedResponse);
 
-    if (!blockData || !blockData.blockNumberOrHash) {
+    if (!validatedResponse.success) {
         throw new Error('Failed to extract a valid block number or hash from the message');
     }
 
-    return { content: blockData };
+    return validatedResponse.data as GetBlockInfoContent;
 }
 
 // Helper function to format timestamp
@@ -189,11 +197,7 @@ export default {
         elizaLogger.log('Starting GET_BLOCK_INFO action...');
 
         try {
-            const { content: getBlockInfoContent } = await buildGetBlockInfoDetails(
-                runtime,
-                message,
-                state,
-            );
+            const getBlockInfoContent = await buildGetBlockInfoDetails(runtime, message, state);
 
             elizaLogger.debug('getBlockInfoContent', getBlockInfoContent);
 
@@ -275,14 +279,14 @@ Block Content:
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "What's the information for block 12345678?",
                     action: 'GET_BLOCK_INFO',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: '📦 Block 12345678 Information\n\nBasic Details:\n• Number: 12345678\n• Hash: 0x8d7c0cce1768da5c...\n• Parent: 0x557be0d61c75e187...\n⏰ Time: 2023-06-15 12:34:56 UTC\n\nMerkle Roots:\n• State Root: 0x7b8f01096c356d77...\n• Extrinsics Root: 0x8a65db1f6cc5a7e5...\n\nBlock Content:\n• 📋 Extrinsics: 3\n• 📝 Events: 8\n\n📊 This block processed 3 transactions and generated 8 events.',
                 },
@@ -290,14 +294,14 @@ Block Content:
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Show me the details of block 0x8d7c0cce1768da5c1725def400ce1a337369cbba4c4844d6f9b8bab255c9bb07',
                     action: 'GET_BLOCK_INFO',
                 },
             },
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: '📦 Block 12345678 Information\n\nBasic Details:\n• Number: 12345678\n• Hash: 0x8d7c0cce1768da5c...\n• Parent: 0x557be0d61c75e187...\n⏰ Time: 2023-06-15 12:34:56 UTC\n\nMerkle Roots:\n• State Root: 0x7b8f01096c356d77...\n• Extrinsics Root: 0x8a65db1f6cc5a7e5...\n\nBlock Content:\n• 📋 Extrinsics: 3\n• 📝 Events: 8\n\n📊 This block processed 3 transactions and generated 8 events.',
                 },

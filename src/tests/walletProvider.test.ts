@@ -1,5 +1,5 @@
 import type { IAgentRuntime } from '@elizaos/core';
-import { CacheManager, MemoryCacheAdapter } from '@elizaos/core';
+import { CacheManager } from '../utils/cache';
 
 import { describe, it, vi, beforeAll, beforeEach, afterEach, expect } from 'vitest';
 import {
@@ -15,15 +15,17 @@ import {
 import { mnemonicGenerate } from '@polkadot/util-crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { CONFIG_KEYS } from '../enviroment';
-
-// Create a single shared cache manager instance
-const sharedCacheManager = new CacheManager(new MemoryCacheAdapter());
+const cacheManager = new CacheManager();
 
 const mockGetSetting = vi.fn();
 const mockedAgentRuntime = {
     character: { name: 'TestAgent' },
-    cacheManager: sharedCacheManager,
+    getCache: vi.fn().mockImplementation((key: string) => {
+        return cacheManager.get(key);
+    }),
+    setCache: vi.fn().mockImplementation((key: string, value: unknown) => {
+        cacheManager.set(key, value);
+    }),
     getSetting: mockGetSetting,
 } as unknown as IAgentRuntime;
 
@@ -42,7 +44,7 @@ describe('WalletProvider', () => {
         testMnemonic = mnemonicGenerate(12);
         mockGetSetting.mockImplementation((key: string) => {
             if (key === 'COINMARKETCAP_API_KEY') return 'test_cmc_key';
-            if (key === CONFIG_KEYS.POLKADOT_PRIVATE_KEY) return testMnemonic;
+            if (key === 'POLKADOT_PRIVATE_KEY') return testMnemonic;
             return null;
         });
     });
@@ -65,7 +67,7 @@ describe('WalletProvider', () => {
         mockFetch.mockClear();
 
         // Initialize the cache with an empty structure
-        await mockedAgentRuntime.cacheManager.set(WALLET_CACHE_KEY, {
+        await mockedAgentRuntime.setCache(WALLET_CACHE_KEY, {
             wallets: {},
             numberToAddress: {},
         });
@@ -111,7 +113,7 @@ describe('WalletProvider', () => {
 
         it('should throw error when keypair is not loaded', () => {
             const params: WalletProviderConstructionParams = {
-                cacheManager: mockedAgentRuntime.cacheManager,
+                runtime: mockedAgentRuntime,
                 source: {
                     type: WalletSourceType.FROM_MNEMONIC,
                     mnemonic:
@@ -203,15 +205,14 @@ describe('WalletProvider', () => {
 
             await WalletProvider.storeWalletInCache(address, walletProvider);
             const cache =
-                await walletProvider.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+                await walletProvider.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
             expect(cache).toBeDefined();
             expect(cache?.wallets[address]).toBeDefined();
         });
 
         it('should clear all wallets from cache', async () => {
             await WalletProvider.clearAllWalletsFromCache(walletProvider);
-            const cache =
-                await mockedAgentRuntime.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+            const cache = await mockedAgentRuntime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
             expect(cache).toEqual({
                 wallets: {},
                 numberToAddress: {},

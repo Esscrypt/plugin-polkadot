@@ -1,5 +1,10 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
+import {
+    elizaLogger,
+    ModelType,
+    composePromptFromState,
+    parseJSONObjectFromText,
+} from '@elizaos/core';
 import { WALLET_CACHE_KEY, WalletProvider, initWalletProvider } from '../providers/wallet';
 import type { OptimizedWalletCache } from '../providers/wallet';
 import { stringToU8a, hexToU8a } from '@polkadot/util';
@@ -105,7 +110,7 @@ export class ValidateAction {
             }
             // Get wallet number from cache
             const cache =
-                await targetWallet.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+                await targetWallet.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
             currentWalletNumber = cache?.wallets[walletAddress]?.number || null;
         }
 
@@ -142,19 +147,34 @@ export async function buildValidateSignatureDetails(
     state: State,
 ): Promise<ValidateSignatureContent> {
     const currentState = state || (await runtime.composeState(message));
-    const context = composeContext({
+    const prompt = composePromptFromState({
         state: currentState,
         template: validateSignatureTemplate,
     });
 
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: validateSignatureSchema as z.ZodTypeAny,
-        modelClass: ModelClass.SMALL,
-    });
+    const parsedResponse: ValidateSignatureContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        const parsedResponse = parseJSONObjectFromText(response) as ValidateSignatureContent | null;
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    return result.object as ValidateSignatureContent;
+    if (!parsedResponse) {
+        throw new Error('Failed to extract a valid validate signature details from the message');
+    }
+
+    //zod validate the response
+    const validatedResponse = validateSignatureSchema.safeParse(parsedResponse);
+
+    if (!validatedResponse.success) {
+        throw new Error('Failed to extract a valid validate signature details from the message');
+    }
+
+    return validatedResponse.data as ValidateSignatureContent;
 }
 
 // Type guard for validate signature content
@@ -244,14 +264,14 @@ export default {
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "Please verify this signature: 0x1234... for message 'hello world'",
                     action: 'VALIDATE_POLKADOT_SIGNATURE',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'Signature is valid for address 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb',
                 },
@@ -259,14 +279,14 @@ export default {
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "Check if signature 0x5678... is valid for message 'test' using wallet #1",
                     action: 'VALIDATE_POLKADOT_SIGNATURE',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'Signature is valid for address 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb',
                 },

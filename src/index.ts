@@ -11,6 +11,8 @@ import getReferendaAction from './actions/getReferenda.ts';
 import getReferendumDetailsAction from './actions/getReferendumDetails.ts';
 import { WalletProvider, nativeWalletProvider } from './providers/wallet.ts';
 import networkDataProvider from './providers/networkData.ts';
+import transferFundsAction from './actions/transferFunds.ts';
+import crossChainTransferAction from './actions/crossChainTransfer.ts';
 
 export {
     WalletProvider,
@@ -24,6 +26,8 @@ export {
     getReferendaAction as GetReferenda,
     getReferendumDetailsAction as GetReferendumDetails,
     validateSignatureAction as ValidateSignature,
+    transferFundsAction as TransferPolkadotFunds,
+    crossChainTransferAction as CrossChainTransfer,
 };
 
 export const polkadotPlugin: Plugin = {
@@ -40,6 +44,8 @@ export const polkadotPlugin: Plugin = {
         getReferendaAction,
         getReferendumDetailsAction,
         validateSignatureAction,
+        transferFundsAction,
+        crossChainTransferAction,
     ],
     evaluators: [],
     providers: [nativeWalletProvider, networkDataProvider],

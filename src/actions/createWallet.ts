@@ -1,5 +1,6 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import { elizaLogger, ModelClass, generateObject, composeContext } from '@elizaos/core';
+import { composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
+import { elizaLogger, ModelType } from '@elizaos/core';
 import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import { z } from 'zod';
 
@@ -42,42 +43,42 @@ export const passwordTemplate = `Respond with a JSON markdown block containing o
  */
 export async function buildCreateWalletDetails(
     runtime: IAgentRuntime,
-    message: Memory,
+    _message: Memory,
     state: State,
 ): Promise<{ content: CreateWalletContent; wasPasswordGenerated: boolean }> {
-    // Compose the current state (or create one based on the message)
-    const currentState = state || (await runtime.composeState(message));
-
-    // Compose a context to drive the object geSneration.
-    const context = composeContext({
-        state: currentState,
+    const prompt = composePromptFromState({
+        state,
         template: passwordTemplate,
     });
 
-    // Generate an object using the defined schema.
-    const result = await generateObject({
-        runtime,
-        context,
-        schema: passwordSchema as z.ZodTypeAny,
-        modelClass: ModelClass.SMALL,
-    });
+    let parsedResponse: CreateWalletContent | null = null;
+    for (let i = 0; i < 5; i++) {
+        const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+            prompt,
+        });
+        // try parsing to a json object
+        const parsedResponse = parseJSONObjectFromText(response) as CreateWalletContent | null;
+        // see if it contains objective and attachmentIds
+        if (parsedResponse) {
+            break;
+        }
+    }
 
-    let passwordData = result.object as CreateWalletContent | undefined;
     let wasPasswordGenerated = false;
 
     // If passwordData is undefined or encryptionPassword is not available, generate one.
-    if (!passwordData?.encryptionPassword) {
+    if (!parsedResponse?.encryptionPassword) {
         const generatedPassword = Math.random().toString(36).slice(-12); // Generate a 12-character random password
         elizaLogger.log('Encryption password not provided by user, generating one.');
         // Ensure passwordData is an object before spreading. If it was undefined, initialize it.
         // If passwordData was undefined, initialize with a default text. Otherwise, use existing passwordData.
-        const baseData = passwordData || { text: '' }; // Provide default text if passwordData is null/undefined
-        passwordData = { ...baseData, encryptionPassword: generatedPassword };
+        const baseData = parsedResponse || { text: '' }; // Provide default text if passwordData is null/undefined
+        parsedResponse = { ...baseData, encryptionPassword: generatedPassword };
         wasPasswordGenerated = true;
     }
 
     // At this point, passwordData is guaranteed to be defined and have an encryptionPassword.
-    const createWalletContent: CreateWalletContent = passwordData;
+    const createWalletContent: CreateWalletContent = parsedResponse;
 
     return { content: createWalletContent, wasPasswordGenerated };
 }
@@ -227,14 +228,14 @@ This wallet number can be used to load and interact with your wallet in future s
     examples: [
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: "Please create a new Polkadot wallet with keypair password 'secret' and hard derivation 'test'",
                     action: 'CREATE_POLKADOT_WALLET',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'New Polkadot wallet created!\nYour password was used to encrypt the wallet keypair, but never stored.\nWallet Address: EQAXxxxxxxxxxxxxxxxxxxxxxx\nWallet Number: 1\nKeypair Password: secret\nHard Derivation: test\n\nPlease securely store your mnemonic:',
                 },
@@ -242,14 +243,14 @@ This wallet number can be used to load and interact with your wallet in future s
         ],
         [
             {
-                user: '{{user1}}',
+                name: '{{user1}}',
                 content: {
                     text: 'Please create a new wallet',
                     action: 'CREATE_POLKADOT_WALLET',
                 },
             },
             {
-                user: '{{user2}}',
+                name: '{{user2}}',
                 content: {
                     text: 'New Polkadot wallet created!\nWallet Number: 1\nWallet Address: EQAXxxxxxxxxxxxxxxxxxxxxxx\n\nPlease securely store your mnemonic:',
                 },

@@ -2,3 +2,9 @@ node_modules
 .turbo
 
 test_wallet_backups/
+
+lib
+
+.env
+
+polkadot_wallet_backups/

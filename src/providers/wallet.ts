@@ -1,14 +1,13 @@
-import type { IAgentRuntime, ICacheManager, Memory, Provider, State } from '@elizaos/core';
+import type { IAgentRuntime, Memory, Provider, State, ProviderResult } from '@elizaos/core';
 import { elizaLogger } from '@elizaos/core';
-import { CacheManager, MemoryCacheAdapter } from '@elizaos/core';
 
 import * as path from 'node:path'; // Changed to use node: protocol
 import type BigNumber from 'bignumber.js';
-import { CONFIG_KEYS } from '../enviroment';
 
 import { Keyring } from '@polkadot/keyring';
 import { cryptoWaitReady, mnemonicGenerate } from '@polkadot/util-crypto';
 import type { KeyringOptions } from '@polkadot/keyring/types';
+import { z } from 'zod'; // Add Zod import
 
 import fs from 'node:fs';
 import { fetchPrices, getFormattedPortfolio } from '../utils/wallet';
@@ -63,6 +62,32 @@ export enum WalletSourceType { // Exported for potential external use
     FROM_ENCRYPTED_JSON = 'fromEncryptedJson',
 }
 
+// Zod schema for KeyringOptions
+const keyringOptionsSchema = z.object({
+    type: z.enum(['ed25519', 'sr25519', 'ecdsa']).optional(), // Made optional to handle potential older backups
+    ss58Format: z.number().optional(), // Made optional for flexibility
+    genesisHash: z.union([z.string(), z.instanceof(Uint8Array)]).optional(),
+    // parentAddress: z.string().optional(), // Add if needed, keeping it simple for now
+});
+
+// This interface defines the structure of the data stored in the encrypted backup file.
+// And a corresponding Zod schema for validation.
+interface DecryptedWalletBackupData {
+    mnemonic: string;
+    options: KeyringOptions; // Contains type, ss58Format for the keyring
+    password?: string; // Optional password for deriving the keypair (part of SURI)
+    hardDerivation?: string; // Optional hard derivation path (part of SURI)
+    softDerivation?: string; // Optional soft derivation path (part of SURI)
+}
+
+const decryptedWalletBackupDataSchema = z.object({
+    mnemonic: z.string().min(12), // Basic mnemonic validation
+    options: keyringOptionsSchema,
+    password: z.string().optional(),
+    hardDerivation: z.string().optional(),
+    softDerivation: z.string().optional(),
+});
+
 interface WalletSourceFromMnemonic {
     type: WalletSourceType.FROM_MNEMONIC;
     mnemonic: string;
@@ -81,23 +106,20 @@ type WalletProviderSource = WalletSourceFromMnemonic | WalletSourceFromEncrypted
 
 export interface WalletProviderConstructionParams {
     // Exporting for potential external use
-    cacheManager: ICacheManager;
     source: WalletProviderSource;
+    runtime: IAgentRuntime;
 }
 // --- End Interfaces --- //
 
 export class WalletProvider {
+    runtime: IAgentRuntime;
     keyring: Keyring;
-    cacheManager: ICacheManager;
     coinMarketCapApiKey: string;
     walletNumber: number | null = null;
     source: WalletProviderSource;
 
     constructor(params: WalletProviderConstructionParams) {
-        this.cacheManager =
-            process.env[CONFIG_KEYS.USE_CACHE_MANAGER] !== 'false'
-                ? params.cacheManager
-                : new CacheManager(new MemoryCacheAdapter());
+        this.runtime = params.runtime;
         this.coinMarketCapApiKey = process.env.COINMARKETCAP_API_KEY || '';
         if (!this.coinMarketCapApiKey) {
             elizaLogger.warn('COINMARKETCAP_API_KEY is not set. Price fetching will likely fail.');
@@ -140,7 +162,7 @@ export class WalletProvider {
         let cache: OptimizedWalletCache;
         try {
             const cachedData =
-                await wallet.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+                await wallet.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
             if (cachedData) {
                 elizaLogger.debug('Retrieved existing cache');
                 cache = cachedData;
@@ -195,7 +217,7 @@ export class WalletProvider {
         cache.numberToAddress[finalWalletNumber] = address;
 
         try {
-            await wallet.cacheManager.set(WALLET_CACHE_KEY, cache);
+            await wallet.runtime.setCache(WALLET_CACHE_KEY, cache);
             elizaLogger.debug('Successfully stored wallet in cache');
         } catch (error) {
             elizaLogger.error('Failed to store wallet in cache:', {
@@ -231,19 +253,21 @@ export class WalletProvider {
 
         try {
             const files = fs.readdirSync(backupDir);
-            // If no files exist, this is the first wallet
             if (files.length === 0) {
                 return 1;
             }
-            // Otherwise, this wallet gets the next number
-            return files.length;
+            return files.length; // Fixed: return the actual number of files
         } catch (_error) {
+            elizaLogger.warn(
+                'Error reading backup directory for wallet numbering, defaulting to 1:',
+                _error,
+            );
             return 1;
         }
     }
 
     static async clearWalletFromCache(wallet: WalletProvider, address: string): Promise<void> {
-        const cache = await wallet.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+        const cache = await wallet.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
         if (!cache) return;
 
         const walletNumber = cache.wallets[address]?.number;
@@ -252,11 +276,11 @@ export class WalletProvider {
         }
         delete cache.wallets[address];
 
-        await wallet.cacheManager.set(WALLET_CACHE_KEY, cache);
+        await wallet.runtime.setCache(WALLET_CACHE_KEY, cache);
     }
 
     static async clearAllWalletsFromCache(wallet: WalletProvider): Promise<void> {
-        await wallet.cacheManager.set(WALLET_CACHE_KEY, {
+        await wallet.runtime.setCache(WALLET_CACHE_KEY, {
             wallets: {},
             numberToAddress: {},
         });
@@ -268,12 +292,12 @@ export class WalletProvider {
         password?: string,
     ): Promise<WalletProvider> {
         // First check cache
-        const cache = await wallet.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+        const cache = await wallet.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
         if (cache?.wallets[address]) {
             const walletData = cache.wallets[address];
             if (walletData.mnemonicData) {
                 return new WalletProvider({
-                    cacheManager: wallet.cacheManager,
+                    runtime: wallet.runtime,
                     source: {
                         type: WalletSourceType.FROM_MNEMONIC,
                         mnemonic: walletData.mnemonicData.mnemonic,
@@ -283,7 +307,7 @@ export class WalletProvider {
             }
             if (walletData.encryptedData && password) {
                 return new WalletProvider({
-                    cacheManager: wallet.cacheManager,
+                    runtime: wallet.runtime,
                     source: {
                         type: WalletSourceType.FROM_ENCRYPTED_JSON,
                         encryptedJson: walletData.encryptedData,
@@ -318,7 +342,7 @@ export class WalletProvider {
         });
 
         const walletProvider = new WalletProvider({
-            cacheManager: wallet.cacheManager,
+            runtime: wallet.runtime,
             source: {
                 type: WalletSourceType.FROM_ENCRYPTED_JSON,
                 encryptedJson: encryptedFileContent,
@@ -337,14 +361,14 @@ export class WalletProvider {
         password?: string,
     ): Promise<WalletProvider> {
         // First check cache
-        const cache = await wallet.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+        const cache = await wallet.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
         if (cache?.numberToAddress[number]) {
             const address = cache.numberToAddress[number];
             const walletData = cache.wallets[address];
 
             if (walletData.mnemonicData) {
                 return new WalletProvider({
-                    cacheManager: wallet.cacheManager,
+                    runtime: wallet.runtime,
                     source: {
                         type: WalletSourceType.FROM_MNEMONIC,
                         mnemonic: walletData.mnemonicData.mnemonic,
@@ -354,7 +378,7 @@ export class WalletProvider {
             }
             if (walletData.encryptedData && password) {
                 return new WalletProvider({
-                    cacheManager: wallet.cacheManager,
+                    runtime: wallet.runtime,
                     source: {
                         type: WalletSourceType.FROM_ENCRYPTED_JSON,
                         encryptedJson: walletData.encryptedData,
@@ -389,7 +413,7 @@ export class WalletProvider {
         });
 
         const walletProvider = new WalletProvider({
-            cacheManager: wallet.cacheManager,
+            runtime: wallet.runtime,
             source: {
                 type: WalletSourceType.FROM_ENCRYPTED_JSON,
                 encryptedJson: encryptedFileContent,
@@ -402,6 +426,35 @@ export class WalletProvider {
         return walletProvider;
     }
 
+    // Private helper to initialize keyring from detailed components
+    private _initKeyringFromDetails(
+        mnemonic: string,
+        keyringOptions: KeyringOptions,
+        keypairPassword?: string, // Password for the keypair itself (goes into SURI)
+        hardDerivation?: string,
+        softDerivation?: string,
+        pairName = 'derived pair', // Added pairName as parameter
+    ): void {
+        this.keyring = new Keyring(keyringOptions);
+        let suri = mnemonic;
+        if (keypairPassword) {
+            suri = `${suri}///${keypairPassword}`;
+        }
+        if (hardDerivation) {
+            suri = `${suri}//${hardDerivation}`;
+        }
+        if (softDerivation) {
+            suri = `${suri}/${softDerivation}`;
+        }
+        elizaLogger.debug(
+            'Generated SURI for keyring init:',
+            suri,
+            'with options:',
+            keyringOptions,
+        );
+        this.keyring.addFromUri(suri, { name: pairName }, keyringOptions.type);
+    }
+
     // Private handler methods for initialization logic
     private _initializeFromMnemonic(source: WalletSourceFromMnemonic): void {
         try {
@@ -412,23 +465,15 @@ export class WalletProvider {
             };
             elizaLogger.debug('Using keyring options:', opts);
 
-            this.keyring = new Keyring(opts);
-
-            // Build the SURI with optional password and derivations
-            let suri = source.mnemonic;
-            if (source.password) {
-                suri = `${suri}///${source.password}`;
-            }
-            if (source.hardDerivation) {
-                suri = `${suri}//${source.hardDerivation}`;
-            }
-            if (source.softDerivation) {
-                suri = `${suri}/${source.softDerivation}`;
-            }
-            elizaLogger.debug('Generated SURI:', suri);
-
-            this.keyring.addFromUri(suri, { name: 'main pair' }, opts.type);
-            elizaLogger.debug('Wallet initialized successfully');
+            this._initKeyringFromDetails(
+                source.mnemonic,
+                opts,
+                source.password, // This is the keypair password from the source
+                source.hardDerivation,
+                source.softDerivation,
+                'main pair', // Specific name for this initialization path
+            );
+            elizaLogger.debug('Wallet initialized successfully from mnemonic');
         } catch (error) {
             elizaLogger.error('Error initializing from mnemonic:', {
                 error:
@@ -449,23 +494,22 @@ export class WalletProvider {
             elizaLogger.debug('Initializing wallet from encrypted JSON');
             elizaLogger.debug('Encrypted data length:', source.encryptedJson.length);
 
-            const decryptedJson = decrypt(source.encryptedJson, source.password);
+            const decryptedJson = decrypt(source.encryptedJson, source.password); // source.password is for decryption
             elizaLogger.debug('Decrypted JSON length:', decryptedJson.length);
-            elizaLogger.debug('Decrypted JSON content:', decryptedJson);
+            // elizaLogger.debug('Decrypted JSON content:', decryptedJson); // Avoid logging potentially sensitive mnemonics
 
-            let MnemonicAndOptions: {
-                mnemonic: string;
-                options: KeyringOptions;
-            };
+            let walletData: DecryptedWalletBackupData;
             try {
-                elizaLogger.debug('Attempting to parse decrypted JSON');
-                MnemonicAndOptions = JSON.parse(decryptedJson) as {
-                    mnemonic: string;
-                    options: KeyringOptions;
-                };
-                elizaLogger.debug('Successfully parsed wallet data:', MnemonicAndOptions);
+                elizaLogger.debug(
+                    'Attempting to parse and validate decrypted JSON for wallet data',
+                );
+                const parsedJson: unknown = JSON.parse(decryptedJson);
+                walletData = decryptedWalletBackupDataSchema.parse(
+                    parsedJson,
+                ) as DecryptedWalletBackupData;
+                elizaLogger.debug('Successfully parsed and validated wallet data structure');
             } catch (parseError) {
-                elizaLogger.error('JSON Parse Error:', {
+                elizaLogger.error('JSON Parse or Validation Error:', {
                     error:
                         parseError instanceof Error
                             ? {
@@ -474,23 +518,45 @@ export class WalletProvider {
                                   name: parseError.name,
                               }
                             : parseError,
-                    json: decryptedJson,
+                    // json: decryptedJson, // Avoid logging potentially sensitive mnemonics
                 });
                 throw new Error(`Failed to parse decrypted wallet data: ${parseError.message}`);
             }
 
-            if (!MnemonicAndOptions.mnemonic || !MnemonicAndOptions.options) {
-                elizaLogger.error('Missing required fields in parsed data:', MnemonicAndOptions);
+            if (!walletData.mnemonic || !walletData.options) {
+                elizaLogger.error(
+                    'Missing required fields (mnemonic or options) in parsed wallet data.',
+                );
                 throw new Error('Decrypted data missing required fields (mnemonic or options)');
             }
 
-            this.keyring = new Keyring(MnemonicAndOptions.options);
-            this.keyring.addFromUri(
-                MnemonicAndOptions.mnemonic,
-                { name: 'imported main pair' },
-                MnemonicAndOptions.options.type,
+            // Ensure options has a type, default if not present (though it should be by generator)
+            const keyringInitOptions = walletData.options;
+            if (!keyringInitOptions.type) {
+                elizaLogger.warn(
+                    'Keyring type missing in decrypted options, defaulting to ed25519 as per PROVIDER_CONFIG',
+                );
+                keyringInitOptions.type = PROVIDER_CONFIG.DEFAULT_KEYRING_TYPE;
+            }
+            if (
+                keyringInitOptions.ss58Format === undefined ||
+                keyringInitOptions.ss58Format === null
+            ) {
+                elizaLogger.warn(
+                    'ss58Format missing in decrypted options, defaulting as per PROVIDER_CONFIG',
+                );
+                keyringInitOptions.ss58Format = PROVIDER_CONFIG.DEFAULT_KEYRING_SS58_FORMAT;
+            }
+
+            this._initKeyringFromDetails(
+                walletData.mnemonic,
+                keyringInitOptions, // These are the KeyringOptions from the backup (type, ss58Format)
+                walletData.password, // This is the keypair password from the backup for the SURI
+                walletData.hardDerivation,
+                walletData.softDerivation,
+                'imported main pair', // Specific name for this initialization path
             );
-            elizaLogger.debug('Wallet initialized successfully');
+            elizaLogger.debug('Wallet initialized successfully from encrypted JSON');
         } catch (error) {
             elizaLogger.error('Error initializing from encrypted JSON:', {
                 error:
@@ -507,7 +573,7 @@ export class WalletProvider {
     }
 
     async fetchPrices(): Promise<{ nativeToken: { usd: BigNumber } }> {
-        return fetchPrices(this.cacheManager, this.coinMarketCapApiKey);
+        return fetchPrices(this.runtime, this.coinMarketCapApiKey);
     }
 
     getAddress(): string {
@@ -525,14 +591,14 @@ export class WalletProvider {
 
         const address = this.getAddress();
 
-        const cache = await this.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+        const cache = await this.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
         const number = cache?.wallets[address]?.number;
         this.walletNumber = number !== undefined ? Number(number) : null;
         return this.walletNumber;
     }
 
     static async getWalletData(wallet: WalletProvider, number: number): Promise<WalletData | null> {
-        const cache = await wallet.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+        const cache = await wallet.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
         if (!cache?.numberToAddress[number]) return null;
 
         const address = cache.numberToAddress[number];
@@ -559,7 +625,7 @@ export class WalletProvider {
         wallet: WalletProvider,
         address: string,
     ): Promise<WalletData | null> {
-        const cache = await wallet.cacheManager.get<OptimizedWalletCache>(WALLET_CACHE_KEY);
+        const cache = await wallet.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
         if (!cache?.wallets[address]) return null;
 
         const walletData = cache.wallets[address];
@@ -602,16 +668,12 @@ export class WalletProvider {
         };
 
         // Create a clean object with only the necessary properties
-        const dataToEncrypt = {
+        const dataToEncrypt: DecryptedWalletBackupData = {
             mnemonic,
-            options: keyringOptions,
-            ...(options?.password && { password: options.password }),
-            ...(options?.hardDerivation && {
-                hardDerivation: options.hardDerivation,
-            }),
-            ...(options?.softDerivation && {
-                softDerivation: options.softDerivation,
-            }),
+            options: keyringOptions, // This is KeyringOptions (type, ss58Format)
+            password: options?.password, // This is the keypair password for SURI
+            hardDerivation: options?.hardDerivation,
+            softDerivation: options?.softDerivation,
         };
 
         // Ensure proper JSON stringification
@@ -620,8 +682,8 @@ export class WalletProvider {
         try {
             const encryptedMnemonicAndOptions = encrypt(jsonString, password);
 
-            const walletProvider = new WalletProvider({
-                cacheManager: wallet.cacheManager,
+            const newWalletProvider = new WalletProvider({
+                runtime: wallet.runtime,
                 source: {
                     type: WalletSourceType.FROM_MNEMONIC,
                     mnemonic,
@@ -636,7 +698,7 @@ export class WalletProvider {
             if (!fs.existsSync(backupDir)) {
                 fs.mkdirSync(backupDir, { recursive: true });
             }
-            const address = walletProvider.getAddress();
+            const address = newWalletProvider.getAddress();
 
             const fileName = `${address}_wallet_backup.json`;
             const filePath = path.join(backupDir, fileName);
@@ -654,10 +716,11 @@ export class WalletProvider {
             const walletNumber = WalletProvider.getNextWalletNumberFromFilesystem();
 
             // Store wallet data in cache using the existing method with the wallet number
-            await WalletProvider.storeWalletInCache(address, walletProvider, walletNumber);
+            await WalletProvider.storeWalletInCache(address, newWalletProvider, walletNumber);
+            newWalletProvider.walletNumber = walletNumber;
 
             return {
-                walletProvider,
+                walletProvider: newWalletProvider,
                 mnemonic,
                 encryptedBackup: encryptedMnemonicAndOptions,
                 walletNumber,
@@ -695,7 +758,7 @@ export class WalletProvider {
         });
 
         const constructionParams: WalletProviderConstructionParams = {
-            cacheManager: runtime.cacheManager,
+            runtime: runtime,
             source: {
                 type: WalletSourceType.FROM_ENCRYPTED_JSON,
                 encryptedJson: encryptedFileContent,
@@ -706,10 +769,10 @@ export class WalletProvider {
     }
 
     static async ejectWalletFromFile(
-        wallet: WalletProvider,
+        wallet: WalletProvider, // wallet instance needed for cache clearing
         walletAddressForBackupName: string,
-        password: string,
-    ): Promise<{ mnemonic: string; options: KeyringOptions }> {
+        password: string, // Password for decrypting the file
+    ): Promise<DecryptedWalletBackupData> {
         const backupDir = path.join(process.cwd(), PROVIDER_CONFIG.WALLET_BACKUP_DIRNAME);
         const fileName = `${walletAddressForBackupName}_wallet_backup.json`;
         const filePath = path.join(backupDir, fileName);
@@ -724,14 +787,14 @@ export class WalletProvider {
         elizaLogger.debug('Read encrypted file content, length:', encryptedFileContent.length);
 
         const decryptedFileJson = decrypt(encryptedFileContent, password);
-        elizaLogger.debug('Decrypted file content:', decryptedFileJson);
+        elizaLogger.debug('Decrypted file content length:', decryptedFileJson.length); // Avoid logging content
 
         try {
-            const mnemonicAndOptions = JSON.parse(decryptedFileJson) as {
-                mnemonic: string;
-                options: KeyringOptions;
-            };
-            elizaLogger.debug('Successfully parsed wallet data:', mnemonicAndOptions);
+            const parsedJson: unknown = JSON.parse(decryptedFileJson);
+            const walletData = decryptedWalletBackupDataSchema.parse(
+                parsedJson,
+            ) as DecryptedWalletBackupData;
+            elizaLogger.debug('Successfully parsed and validated wallet data from ejected file'); // Avoid logging directly
             elizaLogger.log(
                 `Wallet ejected from file ${filePath}, revealing mnemonic and options.`,
             );
@@ -739,9 +802,9 @@ export class WalletProvider {
             // Get the cache from the current instance
             await WalletProvider.clearWalletFromCache(wallet, walletAddressForBackupName);
 
-            return mnemonicAndOptions;
+            return walletData;
         } catch (parseError) {
-            elizaLogger.error('JSON Parse Error in ejectWalletFromFile:', {
+            elizaLogger.error('JSON Parse or Validation Error in ejectWalletFromFile:', {
                 error:
                     parseError instanceof Error
                         ? {
@@ -762,7 +825,7 @@ export class WalletProvider {
         runtime: IAgentRuntime,
     ): Promise<WalletProvider> {
         const constructionParams: WalletProviderConstructionParams = {
-            cacheManager: runtime.cacheManager,
+            runtime: runtime,
             source: {
                 type: WalletSourceType.FROM_ENCRYPTED_JSON,
                 encryptedJson: encryptedMnemonicAndOptions,
@@ -776,19 +839,93 @@ export class WalletProvider {
         );
         return walletProvider;
     }
+
+    // New method to import mnemonic, encrypt, store, and cache
+    static async importMnemonicAndStore(
+        runtime: IAgentRuntime,
+        mnemonic: string,
+        encryptionPassword: string,
+        options?: {
+            keypairPassword?: string;
+            hardDerivation?: string;
+            softDerivation?: string;
+            keyringOptions?: KeyringOptions;
+        },
+    ): Promise<{
+        walletProvider: WalletProvider;
+        address: string;
+        encryptedBackup: string;
+        walletNumber: number;
+    }> {
+        await cryptoWaitReady();
+
+        const keyringOpts: KeyringOptions = options?.keyringOptions || {
+            type: PROVIDER_CONFIG.DEFAULT_KEYRING_TYPE,
+            ss58Format: PROVIDER_CONFIG.DEFAULT_KEYRING_SS58_FORMAT,
+        };
+
+        // Data to be encrypted and stored
+        const dataToEncrypt: DecryptedWalletBackupData = {
+            mnemonic,
+            options: keyringOpts, // This is KeyringOptions (type, ss58Format)
+            password: options?.keypairPassword, // This is the keypair password for SURI
+            hardDerivation: options?.hardDerivation,
+            softDerivation: options?.softDerivation,
+        };
+
+        const jsonStringToEncrypt = JSON.stringify(dataToEncrypt);
+        const encryptedBackup = encrypt(jsonStringToEncrypt, encryptionPassword);
+
+        // Create a new WalletProvider instance from the imported mnemonic
+        const newWalletProvider = new WalletProvider({
+            runtime: runtime,
+            source: {
+                type: WalletSourceType.FROM_MNEMONIC,
+                mnemonic: mnemonic,
+                keyringOptions: keyringOpts,
+                password: options?.keypairPassword, // Pass through optional keypair password
+                hardDerivation: options?.hardDerivation, // Pass through optional hard derivation
+                softDerivation: options?.softDerivation, // Pass through optional soft derivation
+            },
+        });
+
+        const address = newWalletProvider.getAddress();
+
+        // Save encrypted backup to file
+        const backupDir = path.join(process.cwd(), PROVIDER_CONFIG.WALLET_BACKUP_DIRNAME);
+        if (!fs.existsSync(backupDir)) {
+            fs.mkdirSync(backupDir, { recursive: true });
+        }
+        const fileName = `${address}_wallet_backup.json`;
+        const filePath = path.join(backupDir, fileName);
+        fs.writeFileSync(filePath, encryptedBackup, { encoding: 'utf-8' });
+        elizaLogger.log(`Wallet backup for imported mnemonic saved to ${filePath}`);
+
+        // Assign a wallet number and cache the wallet
+        const walletNumber = WalletProvider.getNextWalletNumberFromFilesystem();
+        await WalletProvider.storeWalletInCache(address, newWalletProvider, walletNumber);
+        newWalletProvider.walletNumber = walletNumber; // Set on the instance as well
+
+        return {
+            walletProvider: newWalletProvider,
+            address,
+            encryptedBackup,
+            walletNumber,
+        };
+    }
 }
 
 export const initWalletProvider = async (runtime: IAgentRuntime) => {
-    let mnemonic = runtime.getSetting(CONFIG_KEYS.POLKADOT_PRIVATE_KEY);
+    let mnemonic = runtime.getSetting('POLKADOT_PRIVATE_KEY');
     if (!mnemonic) {
-        elizaLogger.error(`${CONFIG_KEYS.POLKADOT_PRIVATE_KEY} is missing`);
+        elizaLogger.error('POLKADOT_PRIVATE_KEY is missing');
         mnemonic = mnemonicGenerate(24);
     }
 
     const mnemonicsArray = mnemonic.split(' ');
     if (mnemonicsArray.length < 12 || mnemonicsArray.length > 24) {
         throw new Error(
-            `${CONFIG_KEYS.POLKADOT_PRIVATE_KEY} mnemonic seems invalid (length: ${mnemonicsArray.length})`,
+            `POLKADOT_PRIVATE_KEY mnemonic seems invalid (length: ${mnemonicsArray.length})`,
         );
     }
 
@@ -800,7 +937,7 @@ export const initWalletProvider = async (runtime: IAgentRuntime) => {
     await cryptoWaitReady();
 
     const walletProvider = new WalletProvider({
-        cacheManager: runtime.cacheManager,
+        runtime: runtime,
         source: {
             type: WalletSourceType.FROM_MNEMONIC,
             mnemonic,
@@ -813,28 +950,28 @@ export const initWalletProvider = async (runtime: IAgentRuntime) => {
 };
 
 export const nativeWalletProvider: Provider = {
-    async get(runtime: IAgentRuntime, _message: Memory, _state?: State): Promise<string | null> {
+    name: 'polkadot_wallet',
+    async get(runtime: IAgentRuntime, _message: Memory, _state?: State): Promise<ProviderResult> {
         const walletProvider = await initWalletProvider(runtime);
         if (runtime.getSetting('COINMARKETCAP_API_KEY')) {
             try {
                 const formattedPortfolio = await getFormattedPortfolio(
                     runtime,
-                    walletProvider.cacheManager,
                     walletProvider.coinMarketCapApiKey,
                     walletProvider.getAddress(),
                 );
                 elizaLogger.log(formattedPortfolio);
-                return formattedPortfolio;
+                return { text: formattedPortfolio };
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 elizaLogger.error(
                     `Error in ${PROVIDER_CONFIG.NATIVE_TOKEN_SYMBOL.toUpperCase()} wallet provider:`,
                     message,
                 );
-                return null;
+                return { text: null };
             }
         }
 
-        return null;
+        return { text: null };
     },
 };

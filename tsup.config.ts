@@ -5,17 +5,24 @@ export default defineConfig({
     outDir: "dist",
     sourcemap: true,
     clean: true,
-    format: ["esm"], // Ensure you're targeting CommonJS
+    format: ["esm"],
     external: [
         "@elizaos/core",
-        "dotenv", // Externalize dotenv to prevent bundling
-        "fs", // Externalize fs to use Node.js built-in module
-        "path", // Externalize other built-ins if necessary
+        "@substrate/asset-transfer-api",
+        "@polkadot/api",
+        "@polkadot/keyring",
+        "@polkadot/util-crypto",
+        "@polkadot/util",
+        "dotenv",
+        "fs",
+        "path",
         "@reflink/reflink",
         "@node-llama-cpp",
         "https",
         "http",
         "agentkeepalive",
-        "@pinata/sdk"
+        "bignumber.js",
+        "zod",
+        "node-cache"
     ],
 });

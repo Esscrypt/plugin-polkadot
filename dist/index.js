@@ -1,41 +1,22 @@
 // src/actions/createWallet.ts
-import { elizaLogger as elizaLogger4, ModelClass, generateObject, composeContext } from "@elizaos/core";
+import { composePromptFromState, parseJSONObjectFromText } from "@elizaos/core";
+import { elizaLogger as elizaLogger4, ModelType } from "@elizaos/core";
 
 // src/providers/wallet.ts
 import { elizaLogger as elizaLogger3 } from "@elizaos/core";
-import { CacheManager, MemoryCacheAdapter } from "@elizaos/core";
 import * as path from "node:path";
-
-// src/enviroment.ts
-import { z } from "zod";
-var CONFIG_KEYS = {
-  POLKADOT_PRIVATE_KEY: "POLKADOT_PRIVATE_KEY",
-  POLKADOT_RPC_URL: "POLKADOT_RPC_URL",
-  POLKADOT_RPC_API_KEY: "POLKADOT_RPC_API_KEY",
-  POLKADOT_MANIFEST_URL: "POLKADOT_MANIFEST_URL",
-  POLKADOT_BRIDGE_URL: "POLKADOT_BRIDGE_URL",
-  USE_CACHE_MANAGER: "USE_CACHE_MANAGER"
-};
-var envSchema = z.object({
-  POLKADOT_PRIVATE_KEY: z.string().min(1, "private key is required"),
-  POLKADOT_RPC_URL: z.string(),
-  POLKADOT_RPC_API_KEY: z.string(),
-  POLKADOT_MANIFEST_URL: z.string(),
-  POLKADOT_BRIDGE_URL: z.string()
-});
-
-// src/providers/wallet.ts
 import { Keyring } from "@polkadot/keyring";
 import { cryptoWaitReady, mnemonicGenerate } from "@polkadot/util-crypto";
+import { z } from "zod";
 import fs from "node:fs";
 
 // src/utils/wallet.ts
 import { elizaLogger } from "@elizaos/core";
 import BigNumber from "bignumber.js";
-async function fetchPrices(cacheManager, coinMarketCapApiKey) {
+async function fetchPrices(runtime, coinMarketCapApiKey) {
   try {
     const cacheKey = "prices";
-    const cachedValue = await cacheManager.get(cacheKey);
+    const cachedValue = await runtime.getCache(cacheKey);
     if (cachedValue) {
       elizaLogger.log("Cache hit for fetchPrices");
       return cachedValue;
@@ -65,7 +46,7 @@ async function fetchPrices(cacheManager, coinMarketCapApiKey) {
           const prices = {
             nativeToken: { usd: new BigNumber(price.price) }
           };
-          cacheManager.set(cacheKey, prices);
+          runtime.setCache(cacheKey, prices);
           return prices;
         }
         throw new Error("Price data not found in CoinMarketCap response structure.");
@@ -98,16 +79,16 @@ function formatPortfolio(runtime, portfolio, walletAddress) {
 `;
   return output;
 }
-async function fetchPortfolioValue(cacheManager, coinMarketCapApiKey, walletAddress) {
+async function fetchPortfolioValue(runtime, coinMarketCapApiKey, walletAddress) {
   try {
     const cacheKey = `portfolio-${walletAddress}`;
-    const cachedValue = await cacheManager.get(cacheKey);
+    const cachedValue = await runtime.getCache(cacheKey);
     if (cachedValue) {
       elizaLogger.log("Cache hit for fetchPortfolioValue", cachedValue);
       return cachedValue;
     }
     elizaLogger.log("Cache miss for fetchPortfolioValue");
-    const prices = await fetchPrices(cacheManager, coinMarketCapApiKey);
+    const prices = await fetchPrices(runtime, coinMarketCapApiKey);
     const nativeTokenBalance = BigInt(0);
     const amount = Number(nativeTokenBalance) / Number(PROVIDER_CONFIG.NATIVE_TOKEN_DECIMALS);
     const totalUsd = new BigNumber(amount.toString()).times(prices.nativeToken.usd);
@@ -115,7 +96,7 @@ async function fetchPortfolioValue(cacheManager, coinMarketCapApiKey, walletAddr
       totalUsd: totalUsd.toString(),
       totalNativeToken: amount.toFixed(4).toString()
     };
-    cacheManager.set(cacheKey, portfolio);
+    runtime.setCache(cacheKey, portfolio);
     return portfolio;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -123,13 +104,9 @@ async function fetchPortfolioValue(cacheManager, coinMarketCapApiKey, walletAddr
     throw new Error(`Failed to fetch portfolio value: ${message}`);
   }
 }
-async function getFormattedPortfolio(runtime, cacheManager, coinMarketCapApiKey, walletAddress) {
+async function getFormattedPortfolio(runtime, coinMarketCapApiKey, walletAddress) {
   try {
-    const portfolio = await fetchPortfolioValue(
-      cacheManager,
-      coinMarketCapApiKey,
-      walletAddress
-    );
+    const portfolio = await fetchPortfolioValue(runtime, coinMarketCapApiKey, walletAddress);
     return formatPortfolio(runtime, portfolio, walletAddress);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -207,14 +184,30 @@ var PROVIDER_CONFIG = {
   // substrate generic, 2 for kusama, 0 for polkadot
 };
 var WALLET_CACHE_KEY = "polkadot/wallets";
+var keyringOptionsSchema = z.object({
+  type: z.enum(["ed25519", "sr25519", "ecdsa"]).optional(),
+  // Made optional to handle potential older backups
+  ss58Format: z.number().optional(),
+  // Made optional for flexibility
+  genesisHash: z.union([z.string(), z.instanceof(Uint8Array)]).optional()
+  // parentAddress: z.string().optional(), // Add if needed, keeping it simple for now
+});
+var decryptedWalletBackupDataSchema = z.object({
+  mnemonic: z.string().min(12),
+  // Basic mnemonic validation
+  options: keyringOptionsSchema,
+  password: z.string().optional(),
+  hardDerivation: z.string().optional(),
+  softDerivation: z.string().optional()
+});
 var WalletProvider = class _WalletProvider {
+  runtime;
   keyring;
-  cacheManager;
   coinMarketCapApiKey;
   walletNumber = null;
   source;
   constructor(params) {
-    this.cacheManager = process.env[CONFIG_KEYS.USE_CACHE_MANAGER] !== "false" ? params.cacheManager : new CacheManager(new MemoryCacheAdapter());
+    this.runtime = params.runtime;
     this.coinMarketCapApiKey = process.env.COINMARKETCAP_API_KEY || "";
     if (!this.coinMarketCapApiKey) {
       elizaLogger3.warn("COINMARKETCAP_API_KEY is not set. Price fetching will likely fail.");
@@ -242,7 +235,7 @@ var WalletProvider = class _WalletProvider {
     elizaLogger3.debug("Starting storeWalletInCache for address:", address);
     let cache;
     try {
-      const cachedData = await wallet.cacheManager.get(WALLET_CACHE_KEY);
+      const cachedData = await wallet.runtime.getCache(WALLET_CACHE_KEY);
       if (cachedData) {
         elizaLogger3.debug("Retrieved existing cache");
         cache = cachedData;
@@ -288,7 +281,7 @@ var WalletProvider = class _WalletProvider {
     cache.wallets[address] = walletData;
     cache.numberToAddress[finalWalletNumber] = address;
     try {
-      await wallet.cacheManager.set(WALLET_CACHE_KEY, cache);
+      await wallet.runtime.setCache(WALLET_CACHE_KEY, cache);
       elizaLogger3.debug("Successfully stored wallet in cache");
     } catch (error) {
       elizaLogger3.error("Failed to store wallet in cache:", {
@@ -318,32 +311,36 @@ var WalletProvider = class _WalletProvider {
       }
       return files.length;
     } catch (_error) {
+      elizaLogger3.warn(
+        "Error reading backup directory for wallet numbering, defaulting to 1:",
+        _error
+      );
       return 1;
     }
   }
   static async clearWalletFromCache(wallet, address) {
-    const cache = await wallet.cacheManager.get(WALLET_CACHE_KEY);
+    const cache = await wallet.runtime.getCache(WALLET_CACHE_KEY);
     if (!cache) return;
     const walletNumber = cache.wallets[address]?.number;
     if (walletNumber) {
       delete cache.numberToAddress[walletNumber];
     }
     delete cache.wallets[address];
-    await wallet.cacheManager.set(WALLET_CACHE_KEY, cache);
+    await wallet.runtime.setCache(WALLET_CACHE_KEY, cache);
   }
   static async clearAllWalletsFromCache(wallet) {
-    await wallet.cacheManager.set(WALLET_CACHE_KEY, {
+    await wallet.runtime.setCache(WALLET_CACHE_KEY, {
       wallets: {},
       numberToAddress: {}
     });
   }
   static async loadWalletByAddress(wallet, address, password) {
-    const cache = await wallet.cacheManager.get(WALLET_CACHE_KEY);
+    const cache = await wallet.runtime.getCache(WALLET_CACHE_KEY);
     if (cache?.wallets[address]) {
       const walletData = cache.wallets[address];
       if (walletData.mnemonicData) {
         return new _WalletProvider({
-          cacheManager: wallet.cacheManager,
+          runtime: wallet.runtime,
           source: {
             type: "fromMnemonic" /* FROM_MNEMONIC */,
             mnemonic: walletData.mnemonicData.mnemonic,
@@ -353,7 +350,7 @@ var WalletProvider = class _WalletProvider {
       }
       if (walletData.encryptedData && password) {
         return new _WalletProvider({
-          cacheManager: wallet.cacheManager,
+          runtime: wallet.runtime,
           source: {
             type: "fromEncryptedJson" /* FROM_ENCRYPTED_JSON */,
             encryptedJson: walletData.encryptedData,
@@ -382,7 +379,7 @@ var WalletProvider = class _WalletProvider {
       encoding: "utf-8"
     });
     const walletProvider = new _WalletProvider({
-      cacheManager: wallet.cacheManager,
+      runtime: wallet.runtime,
       source: {
         type: "fromEncryptedJson" /* FROM_ENCRYPTED_JSON */,
         encryptedJson: encryptedFileContent,
@@ -393,13 +390,13 @@ var WalletProvider = class _WalletProvider {
     return walletProvider;
   }
   static async loadWalletByNumber(wallet, number, password) {
-    const cache = await wallet.cacheManager.get(WALLET_CACHE_KEY);
+    const cache = await wallet.runtime.getCache(WALLET_CACHE_KEY);
     if (cache?.numberToAddress[number]) {
       const address = cache.numberToAddress[number];
       const walletData = cache.wallets[address];
       if (walletData.mnemonicData) {
         return new _WalletProvider({
-          cacheManager: wallet.cacheManager,
+          runtime: wallet.runtime,
           source: {
             type: "fromMnemonic" /* FROM_MNEMONIC */,
             mnemonic: walletData.mnemonicData.mnemonic,
@@ -409,7 +406,7 @@ var WalletProvider = class _WalletProvider {
       }
       if (walletData.encryptedData && password) {
         return new _WalletProvider({
-          cacheManager: wallet.cacheManager,
+          runtime: wallet.runtime,
           source: {
             type: "fromEncryptedJson" /* FROM_ENCRYPTED_JSON */,
             encryptedJson: walletData.encryptedData,
@@ -438,7 +435,7 @@ var WalletProvider = class _WalletProvider {
       encoding: "utf-8"
     });
     const walletProvider = new _WalletProvider({
-      cacheManager: wallet.cacheManager,
+      runtime: wallet.runtime,
       source: {
         type: "fromEncryptedJson" /* FROM_ENCRYPTED_JSON */,
         encryptedJson: encryptedFileContent,
@@ -447,6 +444,27 @@ var WalletProvider = class _WalletProvider {
     });
     await _WalletProvider.storeWalletInCache(walletProvider.getAddress(), walletProvider);
     return walletProvider;
+  }
+  // Private helper to initialize keyring from detailed components
+  _initKeyringFromDetails(mnemonic, keyringOptions, keypairPassword, hardDerivation, softDerivation, pairName = "derived pair") {
+    this.keyring = new Keyring(keyringOptions);
+    let suri = mnemonic;
+    if (keypairPassword) {
+      suri = `${suri}///${keypairPassword}`;
+    }
+    if (hardDerivation) {
+      suri = `${suri}//${hardDerivation}`;
+    }
+    if (softDerivation) {
+      suri = `${suri}/${softDerivation}`;
+    }
+    elizaLogger3.debug(
+      "Generated SURI for keyring init:",
+      suri,
+      "with options:",
+      keyringOptions
+    );
+    this.keyring.addFromUri(suri, { name: pairName }, keyringOptions.type);
   }
   // Private handler methods for initialization logic
   _initializeFromMnemonic(source) {
@@ -457,20 +475,17 @@ var WalletProvider = class _WalletProvider {
         ss58Format: PROVIDER_CONFIG.DEFAULT_KEYRING_SS58_FORMAT
       };
       elizaLogger3.debug("Using keyring options:", opts);
-      this.keyring = new Keyring(opts);
-      let suri = source.mnemonic;
-      if (source.password) {
-        suri = `${suri}///${source.password}`;
-      }
-      if (source.hardDerivation) {
-        suri = `${suri}//${source.hardDerivation}`;
-      }
-      if (source.softDerivation) {
-        suri = `${suri}/${source.softDerivation}`;
-      }
-      elizaLogger3.debug("Generated SURI:", suri);
-      this.keyring.addFromUri(suri, { name: "main pair" }, opts.type);
-      elizaLogger3.debug("Wallet initialized successfully");
+      this._initKeyringFromDetails(
+        source.mnemonic,
+        opts,
+        source.password,
+        // This is the keypair password from the source
+        source.hardDerivation,
+        source.softDerivation,
+        "main pair"
+        // Specific name for this initialization path
+      );
+      elizaLogger3.debug("Wallet initialized successfully from mnemonic");
     } catch (error) {
       elizaLogger3.error("Error initializing from mnemonic:", {
         error: error instanceof Error ? {
@@ -488,34 +503,58 @@ var WalletProvider = class _WalletProvider {
       elizaLogger3.debug("Encrypted data length:", source.encryptedJson.length);
       const decryptedJson = decrypt(source.encryptedJson, source.password);
       elizaLogger3.debug("Decrypted JSON length:", decryptedJson.length);
-      elizaLogger3.debug("Decrypted JSON content:", decryptedJson);
-      let MnemonicAndOptions;
+      let walletData;
       try {
-        elizaLogger3.debug("Attempting to parse decrypted JSON");
-        MnemonicAndOptions = JSON.parse(decryptedJson);
-        elizaLogger3.debug("Successfully parsed wallet data:", MnemonicAndOptions);
+        elizaLogger3.debug(
+          "Attempting to parse and validate decrypted JSON for wallet data"
+        );
+        const parsedJson = JSON.parse(decryptedJson);
+        walletData = decryptedWalletBackupDataSchema.parse(
+          parsedJson
+        );
+        elizaLogger3.debug("Successfully parsed and validated wallet data structure");
       } catch (parseError) {
-        elizaLogger3.error("JSON Parse Error:", {
+        elizaLogger3.error("JSON Parse or Validation Error:", {
           error: parseError instanceof Error ? {
             message: parseError.message,
             stack: parseError.stack,
             name: parseError.name
-          } : parseError,
-          json: decryptedJson
+          } : parseError
+          // json: decryptedJson, // Avoid logging potentially sensitive mnemonics
         });
         throw new Error(`Failed to parse decrypted wallet data: ${parseError.message}`);
       }
-      if (!MnemonicAndOptions.mnemonic || !MnemonicAndOptions.options) {
-        elizaLogger3.error("Missing required fields in parsed data:", MnemonicAndOptions);
+      if (!walletData.mnemonic || !walletData.options) {
+        elizaLogger3.error(
+          "Missing required fields (mnemonic or options) in parsed wallet data."
+        );
         throw new Error("Decrypted data missing required fields (mnemonic or options)");
       }
-      this.keyring = new Keyring(MnemonicAndOptions.options);
-      this.keyring.addFromUri(
-        MnemonicAndOptions.mnemonic,
-        { name: "imported main pair" },
-        MnemonicAndOptions.options.type
+      const keyringInitOptions = walletData.options;
+      if (!keyringInitOptions.type) {
+        elizaLogger3.warn(
+          "Keyring type missing in decrypted options, defaulting to ed25519 as per PROVIDER_CONFIG"
+        );
+        keyringInitOptions.type = PROVIDER_CONFIG.DEFAULT_KEYRING_TYPE;
+      }
+      if (keyringInitOptions.ss58Format === void 0 || keyringInitOptions.ss58Format === null) {
+        elizaLogger3.warn(
+          "ss58Format missing in decrypted options, defaulting as per PROVIDER_CONFIG"
+        );
+        keyringInitOptions.ss58Format = PROVIDER_CONFIG.DEFAULT_KEYRING_SS58_FORMAT;
+      }
+      this._initKeyringFromDetails(
+        walletData.mnemonic,
+        keyringInitOptions,
+        // These are the KeyringOptions from the backup (type, ss58Format)
+        walletData.password,
+        // This is the keypair password from the backup for the SURI
+        walletData.hardDerivation,
+        walletData.softDerivation,
+        "imported main pair"
+        // Specific name for this initialization path
       );
-      elizaLogger3.debug("Wallet initialized successfully");
+      elizaLogger3.debug("Wallet initialized successfully from encrypted JSON");
     } catch (error) {
       elizaLogger3.error("Error initializing from encrypted JSON:", {
         error: error instanceof Error ? {
@@ -528,7 +567,7 @@ var WalletProvider = class _WalletProvider {
     }
   }
   async fetchPrices() {
-    return fetchPrices(this.cacheManager, this.coinMarketCapApiKey);
+    return fetchPrices(this.runtime, this.coinMarketCapApiKey);
   }
   getAddress() {
     const pairs = this.keyring.getPairs();
@@ -542,13 +581,13 @@ var WalletProvider = class _WalletProvider {
       return this.walletNumber;
     }
     const address = this.getAddress();
-    const cache = await this.cacheManager.get(WALLET_CACHE_KEY);
+    const cache = await this.runtime.getCache(WALLET_CACHE_KEY);
     const number = cache?.wallets[address]?.number;
     this.walletNumber = number !== void 0 ? Number(number) : null;
     return this.walletNumber;
   }
   static async getWalletData(wallet, number) {
-    const cache = await wallet.cacheManager.get(WALLET_CACHE_KEY);
+    const cache = await wallet.runtime.getCache(WALLET_CACHE_KEY);
     if (!cache?.numberToAddress[number]) return null;
     const address = cache.numberToAddress[number];
     const walletData = cache.wallets[address];
@@ -569,7 +608,7 @@ var WalletProvider = class _WalletProvider {
     };
   }
   static async getWalletByAddress(wallet, address) {
-    const cache = await wallet.cacheManager.get(WALLET_CACHE_KEY);
+    const cache = await wallet.runtime.getCache(WALLET_CACHE_KEY);
     if (!cache?.wallets[address]) return null;
     const walletData = cache.wallets[address];
     return {
@@ -596,19 +635,17 @@ var WalletProvider = class _WalletProvider {
     const dataToEncrypt = {
       mnemonic,
       options: keyringOptions,
-      ...options?.password && { password: options.password },
-      ...options?.hardDerivation && {
-        hardDerivation: options.hardDerivation
-      },
-      ...options?.softDerivation && {
-        softDerivation: options.softDerivation
-      }
+      // This is KeyringOptions (type, ss58Format)
+      password: options?.password,
+      // This is the keypair password for SURI
+      hardDerivation: options?.hardDerivation,
+      softDerivation: options?.softDerivation
     };
     const jsonString = JSON.stringify(dataToEncrypt);
     try {
       const encryptedMnemonicAndOptions = encrypt(jsonString, password);
-      const walletProvider = new _WalletProvider({
-        cacheManager: wallet.cacheManager,
+      const newWalletProvider = new _WalletProvider({
+        runtime: wallet.runtime,
         source: {
           type: "fromMnemonic" /* FROM_MNEMONIC */,
           mnemonic,
@@ -622,7 +659,7 @@ var WalletProvider = class _WalletProvider {
       if (!fs.existsSync(backupDir)) {
         fs.mkdirSync(backupDir, { recursive: true });
       }
-      const address = walletProvider.getAddress();
+      const address = newWalletProvider.getAddress();
       const fileName = `${address}_wallet_backup.json`;
       const filePath = path.join(backupDir, fileName);
       if (!fs.existsSync(path.dirname(filePath))) {
@@ -633,9 +670,10 @@ var WalletProvider = class _WalletProvider {
       });
       elizaLogger3.log(`Wallet backup saved to ${filePath}`);
       const walletNumber = _WalletProvider.getNextWalletNumberFromFilesystem();
-      await _WalletProvider.storeWalletInCache(address, walletProvider, walletNumber);
+      await _WalletProvider.storeWalletInCache(address, newWalletProvider, walletNumber);
+      newWalletProvider.walletNumber = walletNumber;
       return {
-        walletProvider,
+        walletProvider: newWalletProvider,
         mnemonic,
         encryptedBackup: encryptedMnemonicAndOptions,
         walletNumber
@@ -662,7 +700,7 @@ var WalletProvider = class _WalletProvider {
       encoding: "utf-8"
     });
     const constructionParams = {
-      cacheManager: runtime.cacheManager,
+      runtime,
       source: {
         type: "fromEncryptedJson" /* FROM_ENCRYPTED_JSON */,
         encryptedJson: encryptedFileContent,
@@ -683,17 +721,20 @@ var WalletProvider = class _WalletProvider {
     });
     elizaLogger3.debug("Read encrypted file content, length:", encryptedFileContent.length);
     const decryptedFileJson = decrypt(encryptedFileContent, password);
-    elizaLogger3.debug("Decrypted file content:", decryptedFileJson);
+    elizaLogger3.debug("Decrypted file content length:", decryptedFileJson.length);
     try {
-      const mnemonicAndOptions = JSON.parse(decryptedFileJson);
-      elizaLogger3.debug("Successfully parsed wallet data:", mnemonicAndOptions);
+      const parsedJson = JSON.parse(decryptedFileJson);
+      const walletData = decryptedWalletBackupDataSchema.parse(
+        parsedJson
+      );
+      elizaLogger3.debug("Successfully parsed and validated wallet data from ejected file");
       elizaLogger3.log(
         `Wallet ejected from file ${filePath}, revealing mnemonic and options.`
       );
       await _WalletProvider.clearWalletFromCache(wallet, walletAddressForBackupName);
-      return mnemonicAndOptions;
+      return walletData;
     } catch (parseError) {
-      elizaLogger3.error("JSON Parse Error in ejectWalletFromFile:", {
+      elizaLogger3.error("JSON Parse or Validation Error in ejectWalletFromFile:", {
         error: parseError instanceof Error ? {
           message: parseError.message,
           stack: parseError.stack,
@@ -706,7 +747,7 @@ var WalletProvider = class _WalletProvider {
   }
   static async importWallet(encryptedMnemonicAndOptions, password, runtime) {
     const constructionParams = {
-      cacheManager: runtime.cacheManager,
+      runtime,
       source: {
         type: "fromEncryptedJson" /* FROM_ENCRYPTED_JSON */,
         encryptedJson: encryptedMnemonicAndOptions,
@@ -719,17 +760,68 @@ var WalletProvider = class _WalletProvider {
     );
     return walletProvider;
   }
+  // New method to import mnemonic, encrypt, store, and cache
+  static async importMnemonicAndStore(runtime, mnemonic, encryptionPassword, options) {
+    await cryptoWaitReady();
+    const keyringOpts = options?.keyringOptions || {
+      type: PROVIDER_CONFIG.DEFAULT_KEYRING_TYPE,
+      ss58Format: PROVIDER_CONFIG.DEFAULT_KEYRING_SS58_FORMAT
+    };
+    const dataToEncrypt = {
+      mnemonic,
+      options: keyringOpts,
+      // This is KeyringOptions (type, ss58Format)
+      password: options?.keypairPassword,
+      // This is the keypair password for SURI
+      hardDerivation: options?.hardDerivation,
+      softDerivation: options?.softDerivation
+    };
+    const jsonStringToEncrypt = JSON.stringify(dataToEncrypt);
+    const encryptedBackup = encrypt(jsonStringToEncrypt, encryptionPassword);
+    const newWalletProvider = new _WalletProvider({
+      runtime,
+      source: {
+        type: "fromMnemonic" /* FROM_MNEMONIC */,
+        mnemonic,
+        keyringOptions: keyringOpts,
+        password: options?.keypairPassword,
+        // Pass through optional keypair password
+        hardDerivation: options?.hardDerivation,
+        // Pass through optional hard derivation
+        softDerivation: options?.softDerivation
+        // Pass through optional soft derivation
+      }
+    });
+    const address = newWalletProvider.getAddress();
+    const backupDir = path.join(process.cwd(), PROVIDER_CONFIG.WALLET_BACKUP_DIRNAME);
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+    const fileName = `${address}_wallet_backup.json`;
+    const filePath = path.join(backupDir, fileName);
+    fs.writeFileSync(filePath, encryptedBackup, { encoding: "utf-8" });
+    elizaLogger3.log(`Wallet backup for imported mnemonic saved to ${filePath}`);
+    const walletNumber = _WalletProvider.getNextWalletNumberFromFilesystem();
+    await _WalletProvider.storeWalletInCache(address, newWalletProvider, walletNumber);
+    newWalletProvider.walletNumber = walletNumber;
+    return {
+      walletProvider: newWalletProvider,
+      address,
+      encryptedBackup,
+      walletNumber
+    };
+  }
 };
 var initWalletProvider = async (runtime) => {
-  let mnemonic = runtime.getSetting(CONFIG_KEYS.POLKADOT_PRIVATE_KEY);
+  let mnemonic = runtime.getSetting("POLKADOT_PRIVATE_KEY");
   if (!mnemonic) {
-    elizaLogger3.error(`${CONFIG_KEYS.POLKADOT_PRIVATE_KEY} is missing`);
+    elizaLogger3.error("POLKADOT_PRIVATE_KEY is missing");
     mnemonic = mnemonicGenerate(24);
   }
   const mnemonicsArray = mnemonic.split(" ");
   if (mnemonicsArray.length < 12 || mnemonicsArray.length > 24) {
     throw new Error(
-      `${CONFIG_KEYS.POLKADOT_PRIVATE_KEY} mnemonic seems invalid (length: ${mnemonicsArray.length})`
+      `POLKADOT_PRIVATE_KEY mnemonic seems invalid (length: ${mnemonicsArray.length})`
     );
   }
   const keyringOptions = {
@@ -738,7 +830,7 @@ var initWalletProvider = async (runtime) => {
   };
   await cryptoWaitReady();
   const walletProvider = new WalletProvider({
-    cacheManager: runtime.cacheManager,
+    runtime,
     source: {
       type: "fromMnemonic" /* FROM_MNEMONIC */,
       mnemonic,
@@ -749,28 +841,28 @@ var initWalletProvider = async (runtime) => {
   return walletProvider;
 };
 var nativeWalletProvider = {
+  name: "polkadot_wallet",
   async get(runtime, _message, _state) {
     const walletProvider = await initWalletProvider(runtime);
     if (runtime.getSetting("COINMARKETCAP_API_KEY")) {
       try {
         const formattedPortfolio = await getFormattedPortfolio(
           runtime,
-          walletProvider.cacheManager,
           walletProvider.coinMarketCapApiKey,
           walletProvider.getAddress()
         );
         elizaLogger3.log(formattedPortfolio);
-        return formattedPortfolio;
+        return { text: formattedPortfolio };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         elizaLogger3.error(
           `Error in ${PROVIDER_CONFIG.NATIVE_TOKEN_SYMBOL.toUpperCase()} wallet provider:`,
           message
         );
-        return null;
+        return { text: null };
       }
     }
-    return null;
+    return { text: null };
   }
 };
 
@@ -798,28 +890,30 @@ var passwordTemplate = `Respond with a JSON markdown block containing only the e
   If an encryption password is not provided in the latest message, return null for the encryption password.
 
   Respond with a JSON markdown block containing only the extracted values.`;
-async function buildCreateWalletDetails(runtime, message, state) {
-  const currentState = state || await runtime.composeState(message);
-  const context = composeContext({
-    state: currentState,
+async function buildCreateWalletDetails(runtime, _message, state) {
+  const prompt = composePromptFromState({
+    state,
     template: passwordTemplate
   });
-  const result = await generateObject({
-    runtime,
-    context,
-    schema: passwordSchema,
-    modelClass: ModelClass.SMALL
-  });
-  let passwordData = result.object;
+  let parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
   let wasPasswordGenerated = false;
-  if (!passwordData?.encryptionPassword) {
+  if (!parsedResponse?.encryptionPassword) {
     const generatedPassword = Math.random().toString(36).slice(-12);
     elizaLogger4.log("Encryption password not provided by user, generating one.");
-    const baseData = passwordData || { text: "" };
-    passwordData = { ...baseData, encryptionPassword: generatedPassword };
+    const baseData = parsedResponse || { text: "" };
+    parsedResponse = { ...baseData, encryptionPassword: generatedPassword };
     wasPasswordGenerated = true;
   }
-  const createWalletContent = passwordData;
+  const createWalletContent = parsedResponse;
   return { content: createWalletContent, wasPasswordGenerated };
 }
 var CreateWalletAction = class {
@@ -937,14 +1031,14 @@ ${mnemonic}`;
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Please create a new Polkadot wallet with keypair password 'secret' and hard derivation 'test'",
           action: "CREATE_POLKADOT_WALLET"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "New Polkadot wallet created!\nYour password was used to encrypt the wallet keypair, but never stored.\nWallet Address: EQAXxxxxxxxxxxxxxxxxxxxxxx\nWallet Number: 1\nKeypair Password: secret\nHard Derivation: test\n\nPlease securely store your mnemonic:"
         }
@@ -952,14 +1046,14 @@ ${mnemonic}`;
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Please create a new wallet",
           action: "CREATE_POLKADOT_WALLET"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "New Polkadot wallet created!\nWallet Number: 1\nWallet Address: EQAXxxxxxxxxxxxxxxxxxxxxxx\n\nPlease securely store your mnemonic:"
         }
@@ -969,7 +1063,12 @@ ${mnemonic}`;
 };
 
 // src/actions/ejectWallet.ts
-import { elizaLogger as elizaLogger5, ModelClass as ModelClass2, generateObject as generateObject2, composeContext as composeContext2 } from "@elizaos/core";
+import {
+  elizaLogger as elizaLogger5,
+  ModelType as ModelType2,
+  composePromptFromState as composePromptFromState2,
+  parseJSONObjectFromText as parseJSONObjectFromText2
+} from "@elizaos/core";
 import { z as z3 } from "zod";
 function isEjectWalletContent(content) {
   return (typeof content.password === "string" || content.password === void 0 || content.password === null) && (typeof content.walletAddress === "string" || content.walletAddress === void 0 || content.walletAddress === null) && (typeof content.walletNumber === "number" || content.walletNumber === void 0 || content.walletNumber === null);
@@ -992,19 +1091,26 @@ Example response:
 {{recentMessages}}
 
 Respond with a JSON markdown block containing only the extracted values`;
-async function buildEjectWalletDetails(runtime, message, state) {
-  const currentState = state || await runtime.composeState(message);
-  const context = composeContext2({
-    state: currentState,
+async function buildEjectWalletDetails(runtime, _message, state) {
+  const prompt = composePromptFromState2({
+    state,
     template: ejectWalletTemplate
   });
-  const result = await generateObject2({
-    runtime,
-    context,
-    schema: ejectWalletSchema,
-    modelClass: ModelClass2.SMALL
-  });
-  return result.object;
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType2.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText2(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  const validatedResponse = ejectWalletSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
+    throw new Error("Failed to extract a valid Polkadot address from the message");
+  }
+  return validatedResponse.data;
 }
 var ejectWallet_default = {
   name: "EJECT_POLKADOT_WALLET",
@@ -1112,14 +1218,14 @@ Please store it securely.`,
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Please eject my Polkadot wallet #1 with password my_password",
           action: "EJECT_POLKADOT_WALLET"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "Wallet ejected successfully. Your Decrypted mnemonic is: mnemonic. Please store it securely."
         }
@@ -1127,14 +1233,14 @@ Please store it securely.`,
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Please eject my Polkadot wallet with address 1234567890 and password my_password",
           action: "EJECT_POLKADOT_WALLET"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "Wallet ejected successfully. Your Decrypted mnemonic is: mnemonic. Please store it securely."
         }
@@ -1144,7 +1250,12 @@ Please store it securely.`,
 };
 
 // src/actions/signMessage.ts
-import { elizaLogger as elizaLogger6, ModelClass as ModelClass3, generateObject as generateObject3, composeContext as composeContext3 } from "@elizaos/core";
+import {
+  elizaLogger as elizaLogger6,
+  ModelType as ModelType3,
+  composePromptFromState as composePromptFromState3,
+  parseJSONObjectFromText as parseJSONObjectFromText3
+} from "@elizaos/core";
 import { stringToU8a as stringToU8a2, u8aToHex as u8aToHex2 } from "@polkadot/util";
 import { z as z4 } from "zod";
 function isSignMessageContent(content) {
@@ -1172,17 +1283,25 @@ Example response:
 Respond with a JSON markdown block containing only the extracted values`;
 async function buildSignMessageDetails(runtime, message, state) {
   const currentState = state || await runtime.composeState(message);
-  const context = composeContext3({
+  const prompt = composePromptFromState3({
     state: currentState,
     template: signMessageTemplate
   });
-  const result = await generateObject3({
-    runtime,
-    context,
-    schema: signMessageSchema,
-    modelClass: ModelClass3.SMALL
-  });
-  return result.object;
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType3.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText3(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  const validatedResponse = signMessageSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
+    throw new Error("Failed to extract a valid message to sign from the message");
+  }
+  return validatedResponse.data;
 }
 var SignMessageAction = class {
   walletProvider;
@@ -1219,7 +1338,7 @@ var SignMessageAction = class {
           `Failed to load wallet with address ${walletAddress}. Please check the address.`
         );
       }
-      const cache = await targetWallet.cacheManager.get(WALLET_CACHE_KEY);
+      const cache = await targetWallet.runtime.getCache(WALLET_CACHE_KEY);
       currentWalletNumber = cache?.wallets[walletAddress]?.number || null;
     }
     const pairs = targetWallet.keyring.getPairs();
@@ -1292,14 +1411,14 @@ Signature: ${result.signature}`,
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Please sign the message 'hello world' with my Polkadot wallet.",
           action: "SIGN_POLKADOT_MESSAGE"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "Message signed successfully!\nSigner: 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb\nSignature: 0xabcd1234..."
         }
@@ -1307,14 +1426,14 @@ Signature: ${result.signature}`,
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Can you sign this for me: 'test message 123'",
           action: "SIGN_POLKADOT_MESSAGE"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "Message signed successfully!\nSigner: 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb\nSignature: 0xfedc9876..."
         }
@@ -1324,7 +1443,12 @@ Signature: ${result.signature}`,
 };
 
 // src/actions/loadWallet.ts
-import { elizaLogger as elizaLogger7, ModelClass as ModelClass4, generateObject as generateObject4, composeContext as composeContext4 } from "@elizaos/core";
+import {
+  elizaLogger as elizaLogger7,
+  ModelType as ModelType4,
+  composePromptFromState as composePromptFromState4,
+  parseJSONObjectFromText as parseJSONObjectFromText4
+} from "@elizaos/core";
 import { z as z5 } from "zod";
 function isLoadWalletContent(content) {
   return (typeof content.walletNumber === "number" || content.walletNumber === void 0 || content.walletNumber === null) && (typeof content.walletAddress === "string" || content.walletAddress === void 0 || content.walletAddress === null) && (typeof content.walletPassword === "string" || content.walletPassword === void 0 || content.walletPassword === null);
@@ -1349,17 +1473,25 @@ Example response:
 Respond with a JSON markdown block containing only the extracted values`;
 async function buildLoadWalletDetails(runtime, message, state) {
   const currentState = state || await runtime.composeState(message);
-  const context = composeContext4({
+  const prompt = composePromptFromState4({
     state: currentState,
     template: loadWalletTemplate
   });
-  const result = await generateObject4({
-    runtime,
-    context,
-    schema: loadWalletSchema,
-    modelClass: ModelClass4.SMALL
-  });
-  return result.object;
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType4.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText4(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  const validatedResponse = loadWalletSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
+    throw new Error("Failed to extract a valid wallet number or address from the message");
+  }
+  return parsedResponse;
 }
 var loadWallet_default = {
   name: "LOAD_POLKADOT_WALLET",
@@ -1440,14 +1572,14 @@ Your wallet address is: ${address}${currentWalletNumber ? ` (Wallet #${currentWa
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Please load my Polkadot wallet #1 with password my_password",
           action: "LOAD_POLKADOT_WALLET"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "Wallet loaded successfully!\nWallet #1\nAddress: 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb\n\nThe wallet is now ready for use."
         }
@@ -1455,14 +1587,14 @@ Your wallet address is: ${address}${currentWalletNumber ? ` (Wallet #${currentWa
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Please load my Polkadot wallet with address 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb and password my_password",
           action: "LOAD_POLKADOT_WALLET"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "Wallet loaded successfully!\nWallet #1\nAddress: 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb\n\nThe wallet is now ready for use."
         }
@@ -1472,7 +1604,12 @@ Your wallet address is: ${address}${currentWalletNumber ? ` (Wallet #${currentWa
 };
 
 // src/actions/validateSignature.ts
-import { elizaLogger as elizaLogger8, ModelClass as ModelClass5, generateObject as generateObject5, composeContext as composeContext5 } from "@elizaos/core";
+import {
+  elizaLogger as elizaLogger8,
+  ModelType as ModelType5,
+  composePromptFromState as composePromptFromState5,
+  parseJSONObjectFromText as parseJSONObjectFromText5
+} from "@elizaos/core";
 import { stringToU8a as stringToU8a3, hexToU8a as hexToU8a2 } from "@polkadot/util";
 import { z as z6 } from "zod";
 var validateSignatureSchema = z6.object({
@@ -1539,7 +1676,7 @@ var ValidateAction = class {
           `Failed to load wallet with address ${walletAddress}. Please check the address.`
         );
       }
-      const cache = await targetWallet.cacheManager.get(WALLET_CACHE_KEY);
+      const cache = await targetWallet.runtime.getCache(WALLET_CACHE_KEY);
       currentWalletNumber = cache?.wallets[walletAddress]?.number || null;
     }
     const pairs = targetWallet.keyring.getPairs();
@@ -1563,17 +1700,28 @@ var ValidateAction = class {
 };
 async function buildValidateSignatureDetails(runtime, message, state) {
   const currentState = state || await runtime.composeState(message);
-  const context = composeContext5({
+  const prompt = composePromptFromState5({
     state: currentState,
     template: validateSignatureTemplate
   });
-  const result = await generateObject5({
-    runtime,
-    context,
-    schema: validateSignatureSchema,
-    modelClass: ModelClass5.SMALL
-  });
-  return result.object;
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType5.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText5(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  if (!parsedResponse) {
+    throw new Error("Failed to extract a valid validate signature details from the message");
+  }
+  const validatedResponse = validateSignatureSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
+    throw new Error("Failed to extract a valid validate signature details from the message");
+  }
+  return validatedResponse.data;
 }
 var isValidateSignatureContent = (content) => {
   return typeof content === "object" && content !== null && "message" in content && "signature" in content && ("walletNumber" in content && typeof content.walletNumber === "number" || "walletAddress" in content && typeof content.walletAddress === "string");
@@ -1638,14 +1786,14 @@ var validateSignature_default = {
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Please verify this signature: 0x1234... for message 'hello world'",
           action: "VALIDATE_POLKADOT_SIGNATURE"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "Signature is valid for address 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb"
         }
@@ -1653,14 +1801,14 @@ var validateSignature_default = {
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Check if signature 0x5678... is valid for message 'test' using wallet #1",
           action: "VALIDATE_POLKADOT_SIGNATURE"
         }
       },
       {
-        user: "{{user2}}",
+        name: "{{user2}}",
         content: {
           text: "Signature is valid for address 5GrwvaEF5zXb26FfGZWvt2fBvXN1Jz2yXzL9Vvns8wQMXwXb"
         }
@@ -1670,7 +1818,12 @@ var validateSignature_default = {
 };
 
 // src/actions/getBalance.ts
-import { elizaLogger as elizaLogger10, ModelClass as ModelClass6, generateObject as generateObject6, composeContext as composeContext6 } from "@elizaos/core";
+import {
+  elizaLogger as elizaLogger10,
+  ModelType as ModelType6,
+  composePromptFromState as composePromptFromState6,
+  parseJSONObjectFromText as parseJSONObjectFromText6
+} from "@elizaos/core";
 import { z as z7 } from "zod";
 import { formatBalance } from "@polkadot/util";
 
@@ -1716,7 +1869,7 @@ var PolkadotApiService = class _PolkadotApiService extends Service {
     _PolkadotApiService._instance = null;
   }
   async initialize() {
-    const customEndpoint = this.runtime.getSetting(CONFIG_KEYS.POLKADOT_RPC_URL) || process.env.POLKADOT_RPC_URL;
+    const customEndpoint = this.runtime.getSetting("POLKADOT_RPC_URL");
     if (customEndpoint) {
       this.networkConfig.DEFAULT_ENDPOINT = customEndpoint;
       elizaLogger9.debug(`Using custom Polkadot endpoint: ${customEndpoint}`);
@@ -1846,7 +1999,7 @@ var PolkadotApiService = class _PolkadotApiService extends Service {
 };
 
 // src/actions/getBalance.ts
-var addressSchema = z7.object({
+var getBalanceSchema = z7.object({
   address: z7.string().min(1, "Address is required")
 });
 var addressTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
@@ -1860,23 +2013,26 @@ var addressTemplate = `Respond with a JSON markdown block containing only the ex
   {{recentMessages}}
 
   Respond with a JSON markdown block containing only the extracted values.`;
-async function buildGetBalanceDetails(runtime, message, state) {
-  const currentState = state || await runtime.composeState(message);
-  const context = composeContext6({
-    state: currentState,
+async function buildGetBalanceDetails(runtime, _message, state) {
+  const prompt = composePromptFromState6({
+    state,
     template: addressTemplate
   });
-  const result = await generateObject6({
-    runtime,
-    context,
-    schema: addressSchema,
-    modelClass: ModelClass6.MEDIUM
-  });
-  const addressData = result.object;
-  if (!addressData || !addressData.address) {
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType6.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText6(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  const validatedResponse = getBalanceSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
     throw new Error("Failed to extract a valid Polkadot address from the message");
   }
-  return { content: addressData };
+  return validatedResponse.data;
 }
 var GetBalanceAction = class {
   runtime;
@@ -1901,6 +2057,10 @@ var GetBalanceAction = class {
         decimals: tokenDecimals,
         unit: tokenSymbol
       });
+      const formatOptions = {
+        withSi: false,
+        forceUnit: tokenSymbol
+      };
       const freeBalance = balance.data.free.toString();
       const reservedBalance = balance.data.reserved.toString();
       const totalBalance = (BigInt(balance.data.free) + BigInt(balance.data.reserved)).toString();
@@ -1909,11 +2069,18 @@ var GetBalanceAction = class {
         reservedBalance,
         totalBalance
       });
-      const formattedFreeBalance = formatBalance(balance.data.free);
-      const formattedReservedBalance = formatBalance(balance.data.reserved);
-      const formattedTotalBalance = formatBalance(
-        BigInt(balance.data.free) + BigInt(balance.data.reserved)
-      );
+      const formattedFreeBalance = `${formatBalance(
+        balance.data.free,
+        formatOptions
+      )} ${tokenSymbol}`;
+      const formattedReservedBalance = `${formatBalance(
+        balance.data.reserved,
+        formatOptions
+      )} ${tokenSymbol}`;
+      const formattedTotalBalance = `${formatBalance(
+        BigInt(balance.data.free) + BigInt(balance.data.reserved),
+        formatOptions
+      )} ${tokenSymbol}`;
       elizaLogger10.debug("Formatted balances:", {
         formattedFreeBalance,
         formattedReservedBalance,
@@ -1943,11 +2110,7 @@ var getBalance_default = {
   handler: async (runtime, message, state, _options, callback) => {
     elizaLogger10.log("Starting GET_POLKADOT_BALANCE action...");
     try {
-      const { content: getBalanceContent } = await buildGetBalanceDetails(
-        runtime,
-        message,
-        state
-      );
+      const getBalanceContent = await buildGetBalanceDetails(runtime, message, state);
       elizaLogger10.debug("getBalanceContent", getBalanceContent);
       if (!getBalanceContent || typeof getBalanceContent.address !== "string") {
         elizaLogger10.error("Failed to obtain a valid address.");
@@ -2005,14 +2168,14 @@ Note: Free balance is the amount available for transfers and transactions. Reser
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "What is the balance of 15JRT5GjLAZkuvmpwmjCUp1RRLr7Y6Gnusz37ia37h2Xn5Rz?",
           action: "GET_POLKADOT_BALANCE"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Balance Information for: 15JRT5GjLAZkuvmpwmjCUp1RRLr7Y6Gnusz37ia37h2Xn5Rz\n\nFree Balance: 10.5000 DOT\nReserved Balance: 0.0000 DOT\nTotal Balance: 10.5000 DOT\n\nNote: Free balance is the amount available for transfers and transactions. Reserved balance is locked for various on-chain activities."
         }
@@ -2020,14 +2183,14 @@ Note: Free balance is the amount available for transfers and transactions. Reser
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Check the DOT balance in this address: 15JRT5GjLAZkuvmpwmjCUp1RRLr7Y6Gnusz37ia37h2Xn5Rz",
           action: "GET_POLKADOT_BALANCE"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Balance Information for: 15JRT5GjLAZkuvmpwmjCUp1RRLr7Y6Gnusz37ia37h2Xn5Rz\n\nFree Balance: 10.5000 DOT\nReserved Balance: 0.0000 DOT\nTotal Balance: 10.5000 DOT\n\nNote: Free balance is the amount available for transfers and transactions. Reserved balance is locked for various on-chain activities."
         }
@@ -2037,7 +2200,12 @@ Note: Free balance is the amount available for transfers and transactions. Reser
 };
 
 // src/actions/getBlockInfo.ts
-import { elizaLogger as elizaLogger11, ModelClass as ModelClass7, generateObject as generateObject7, composeContext as composeContext7 } from "@elizaos/core";
+import {
+  elizaLogger as elizaLogger11,
+  ModelType as ModelType7,
+  composePromptFromState as composePromptFromState7,
+  parseJSONObjectFromText as parseJSONObjectFromText7
+} from "@elizaos/core";
 import { z as z8 } from "zod";
 var blockInfoSchema = z8.object({
   blockNumberOrHash: z8.string().min(1, "Block number or hash is required")
@@ -2059,23 +2227,26 @@ var blockInfoTemplate = `Respond with a JSON markdown block containing only the 
   {{recentMessages}}
 
   Respond with a JSON markdown block containing only the extracted values.`;
-async function buildGetBlockInfoDetails(runtime, message, state) {
-  const currentState = state || await runtime.composeState(message);
-  const context = composeContext7({
-    state: currentState,
+async function buildGetBlockInfoDetails(runtime, _message, state) {
+  const prompt = composePromptFromState7({
+    state,
     template: blockInfoTemplate
   });
-  const result = await generateObject7({
-    runtime,
-    context,
-    schema: blockInfoSchema,
-    modelClass: ModelClass7.MEDIUM
-  });
-  const blockData = result.object;
-  if (!blockData || !blockData.blockNumberOrHash) {
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType7.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText7(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  const validatedResponse = blockInfoSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
     throw new Error("Failed to extract a valid block number or hash from the message");
   }
-  return { content: blockData };
+  return validatedResponse.data;
 }
 function formatTimestamp(timestamp) {
   if (timestamp === "Unknown") {
@@ -2150,11 +2321,7 @@ var getBlockInfo_default = {
   handler: async (runtime, message, state, _options, callback) => {
     elizaLogger11.log("Starting GET_BLOCK_INFO action...");
     try {
-      const { content: getBlockInfoContent } = await buildGetBlockInfoDetails(
-        runtime,
-        message,
-        state
-      );
+      const getBlockInfoContent = await buildGetBlockInfoDetails(runtime, message, state);
       elizaLogger11.debug("getBlockInfoContent", getBlockInfoContent);
       if (!getBlockInfoContent || typeof getBlockInfoContent.blockNumberOrHash !== "string") {
         elizaLogger11.error("Failed to obtain a valid block number or hash.");
@@ -2222,14 +2389,14 @@ Block Content:
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "What's the information for block 12345678?",
           action: "GET_BLOCK_INFO"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "\u{1F4E6} Block 12345678 Information\n\nBasic Details:\n\u2022 Number: 12345678\n\u2022 Hash: 0x8d7c0cce1768da5c...\n\u2022 Parent: 0x557be0d61c75e187...\n\u23F0 Time: 2023-06-15 12:34:56 UTC\n\nMerkle Roots:\n\u2022 State Root: 0x7b8f01096c356d77...\n\u2022 Extrinsics Root: 0x8a65db1f6cc5a7e5...\n\nBlock Content:\n\u2022 \u{1F4CB} Extrinsics: 3\n\u2022 \u{1F4DD} Events: 8\n\n\u{1F4CA} This block processed 3 transactions and generated 8 events."
         }
@@ -2237,14 +2404,14 @@ Block Content:
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Show me the details of block 0x8d7c0cce1768da5c1725def400ce1a337369cbba4c4844d6f9b8bab255c9bb07",
           action: "GET_BLOCK_INFO"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "\u{1F4E6} Block 12345678 Information\n\nBasic Details:\n\u2022 Number: 12345678\n\u2022 Hash: 0x8d7c0cce1768da5c...\n\u2022 Parent: 0x557be0d61c75e187...\n\u23F0 Time: 2023-06-15 12:34:56 UTC\n\nMerkle Roots:\n\u2022 State Root: 0x7b8f01096c356d77...\n\u2022 Extrinsics Root: 0x8a65db1f6cc5a7e5...\n\nBlock Content:\n\u2022 \u{1F4CB} Extrinsics: 3\n\u2022 \u{1F4DD} Events: 8\n\n\u{1F4CA} This block processed 3 transactions and generated 8 events."
         }
@@ -2254,7 +2421,12 @@ Block Content:
 };
 
 // src/actions/getBlockEvents.ts
-import { elizaLogger as elizaLogger12, ModelClass as ModelClass8, generateObject as generateObject8, composeContext as composeContext8 } from "@elizaos/core";
+import {
+  elizaLogger as elizaLogger12,
+  ModelType as ModelType8,
+  composePromptFromState as composePromptFromState8,
+  parseJSONObjectFromText as parseJSONObjectFromText8
+} from "@elizaos/core";
 import { z as z9 } from "zod";
 var blockEventsSchema = z9.object({
   blockNumberOrHash: z9.string().min(1, "Block number or hash is required"),
@@ -2299,23 +2471,26 @@ var blockEventsTemplate = `Respond with a JSON markdown block containing only th
   {{recentMessages}}
 
   Respond with a JSON markdown block containing only the extracted values.`;
-async function buildGetBlockEventsDetails(runtime, message, state) {
-  const currentState = state || await runtime.composeState(message);
-  const context = composeContext8({
-    state: currentState,
+async function buildGetBlockEventsDetails(runtime, _message, state) {
+  const prompt = composePromptFromState8({
+    state,
     template: blockEventsTemplate
   });
-  const result = await generateObject8({
-    runtime,
-    context,
-    schema: blockEventsSchema,
-    modelClass: ModelClass8.MEDIUM
-  });
-  const blockEventsData = result.object;
-  if (!blockEventsData || !blockEventsData.blockNumberOrHash) {
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType8.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText8(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  const validatedResponse = blockEventsSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
     throw new Error("Failed to extract a valid block number or hash from the message");
   }
-  return { content: blockEventsData };
+  return validatedResponse.data;
 }
 function createEventSummary(section, method, data) {
   const eventKey = `${section}.${method}`;
@@ -2447,11 +2622,7 @@ var getBlockEvents_default = {
   handler: async (runtime, message, state, _options, callback) => {
     elizaLogger12.log("Starting GET_BLOCK_EVENTS action...");
     try {
-      const { content: getBlockEventsContent } = await buildGetBlockEventsDetails(
-        runtime,
-        message,
-        state
-      );
+      const getBlockEventsContent = await buildGetBlockEventsDetails(runtime, message, state);
       elizaLogger12.debug("getBlockEventsContent", getBlockEventsContent);
       if (!getBlockEventsContent || typeof getBlockEventsContent.blockNumberOrHash !== "string") {
         elizaLogger12.error("Failed to obtain a valid block number or hash.");
@@ -2521,14 +2692,14 @@ ${eventsDisplay}${moreEventsText}` : "\u274C No events found with the applied fi
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "What events happened in block 12345678?",
           action: "GET_BLOCK_EVENTS"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "\u{1F4E6} Block Events for Block 12345678\nHash: 0x8d7c0cce1768da5c...\n\nSummary:\n\u2022 Total Events: 8\n\u2022 Filtered Events: 8 (showing first 5)\n\nEvents:\n1. system.ExtrinsicSuccess (Extrinsic 1)\n   \u2514\u2500 Extrinsic executed successfully\n\n2. balances.Transfer (Extrinsic 2)\n   \u2514\u2500 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY \u2192 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty (10000000000 units)\n\n3. system.ExtrinsicSuccess (Extrinsic 2)\n   \u2514\u2500 Extrinsic executed successfully\n\n4. treasury.Deposit (Finalization)\n   \u2514\u2500 Treasury deposit: 1000000000 units\n\n5. balances.Deposit (Finalization)\n   \u2514\u2500 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY (+500000000 units)\n\n\u{1F4CB} 3 more events available. Use a higher limit to see more."
         }
@@ -2536,14 +2707,14 @@ ${eventsDisplay}${moreEventsText}` : "\u274C No events found with the applied fi
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Show me only the balances events from block 0x8d7c0cce1768da5c1725def400ce1a337369cbba4c4844d6f9b8bab255c9bb07",
           action: "GET_BLOCK_EVENTS"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "\u{1F4E6} Block Events for Block 12345678\nHash: 0x8d7c0cce1768da5c...\n\nSummary:\n\u2022 Total Events: 8\n\u2022 Filtered Events: 3\nFilter: balances module events only\n\nEvents:\n1. balances.Transfer (Extrinsic 2)\n   \u2514\u2500 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY \u2192 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty (10000000000 units)\n\n2. balances.Deposit (Finalization)\n   \u2514\u2500 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY (+500000000 units)\n\n3. balances.Reserved (Finalization)\n   \u2514\u2500 2 data items"
         }
@@ -2551,14 +2722,14 @@ ${eventsDisplay}${moreEventsText}` : "\u274C No events found with the applied fi
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Get the first 3 events from block 12345678",
           action: "GET_BLOCK_EVENTS"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "\u{1F4E6} Block Events for Block 12345678\nHash: 0x8d7c0cce1768da5c...\n\nSummary:\n\u2022 Total Events: 8\n\u2022 Filtered Events: 8 (showing first 3)\n\nEvents:\n1. system.ExtrinsicSuccess (Extrinsic 1)\n   \u2514\u2500 Extrinsic executed successfully\n\n2. balances.Transfer (Extrinsic 2)\n   \u2514\u2500 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY \u2192 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty (10000000000 units)\n\n3. system.ExtrinsicSuccess (Extrinsic 2)\n   \u2514\u2500 Extrinsic executed successfully\n\n\u{1F4CB} 5 more events available. Use a higher limit to see more."
         }
@@ -2568,7 +2739,12 @@ ${eventsDisplay}${moreEventsText}` : "\u274C No events found with the applied fi
 };
 
 // src/actions/getReferenda.ts
-import { elizaLogger as elizaLogger13, ModelClass as ModelClass9, generateObject as generateObject9, composeContext as composeContext9 } from "@elizaos/core";
+import {
+  elizaLogger as elizaLogger13,
+  ModelType as ModelType9,
+  composePromptFromState as composePromptFromState9,
+  parseJSONObjectFromText as parseJSONObjectFromText9
+} from "@elizaos/core";
 import { z as z10 } from "zod";
 var referendaSchema = z10.object({
   limit: z10.union([z10.number(), z10.string()]).optional().nullable().transform((val) => {
@@ -2599,20 +2775,26 @@ var referendaTemplate = `Respond with a JSON markdown block containing only the 
   {{recentMessages}}
 
   Respond with a JSON markdown block containing only the extracted values.`;
-async function buildGetReferendaDetails(runtime, message, state) {
-  const currentState = state || await runtime.composeState(message);
-  const context = composeContext9({
-    state: currentState,
+async function buildGetReferendaDetails(runtime, _message, state) {
+  const prompt = composePromptFromState9({
+    state,
     template: referendaTemplate
   });
-  const result = await generateObject9({
-    runtime,
-    context,
-    schema: referendaSchema,
-    modelClass: ModelClass9.MEDIUM
-  });
-  const referendaData = result.object;
-  return { content: referendaData };
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType9.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText9(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  const validatedResponse = referendaSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
+    throw new Error("Failed to extract a valid number of referenda from the message");
+  }
+  return validatedResponse.data;
 }
 function getTrackName(trackId) {
   if (trackId === -1) {
@@ -2681,7 +2863,7 @@ var GetReferendaAction = class {
       const referendumCount = await api.query.referenda.referendumCount();
       const totalCount = parseInt(referendumCount.toString());
       const referenda = [];
-      const maxLimit = Math.min(limit, 50);
+      const maxLimit = Math.min(limit, 20);
       for (let i = totalCount - 1; i >= 0 && referenda.length < maxLimit; i--) {
         try {
           const referendumInfo = await api.query.referenda.referendumInfoFor(i);
@@ -2764,11 +2946,7 @@ var getReferenda_default = {
   handler: async (runtime, message, state, _options, callback) => {
     elizaLogger13.log("Starting GET_REFERENDA action...");
     try {
-      const { content: getReferendaContent } = await buildGetReferendaDetails(
-        runtime,
-        message,
-        state
-      );
+      const getReferendaContent = await buildGetReferendaDetails(runtime, message, state);
       elizaLogger13.debug("getReferendaContent", getReferendaContent);
       const action = new GetReferendaAction(runtime);
       const referendaInfo = await action.getReferenda(getReferendaContent.limit || 10);
@@ -2834,14 +3012,14 @@ ${referendaDisplay}` : "\u274C No referenda found."}
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "What are the current governance referenda?",
           action: "GET_REFERENDA"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Here's a list of current ongoing referenda..."
         }
@@ -2849,14 +3027,14 @@ ${referendaDisplay}` : "\u274C No referenda found."}
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Show me the last 5 governance proposals",
           action: "GET_REFERENDA"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Here's a list of the 5 latest referenda..."
         }
@@ -2864,14 +3042,14 @@ ${referendaDisplay}` : "\u274C No referenda found."}
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Get me 20 referenda",
           action: "GET_REFERENDA"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Here's a list of the last 20 referenda..."
         }
@@ -2881,7 +3059,12 @@ ${referendaDisplay}` : "\u274C No referenda found."}
 };
 
 // src/actions/getReferendumDetails.ts
-import { elizaLogger as elizaLogger14, ModelClass as ModelClass10, generateObject as generateObject10, composeContext as composeContext10 } from "@elizaos/core";
+import {
+  elizaLogger as elizaLogger14,
+  ModelType as ModelType10,
+  composePromptFromState as composePromptFromState10,
+  parseJSONObjectFromText as parseJSONObjectFromText10
+} from "@elizaos/core";
 import { z as z11 } from "zod";
 var referendumDetailsSchema = z11.object({
   referendumId: z11.union([z11.number(), z11.string()]).transform((val) => {
@@ -2915,20 +3098,28 @@ var referendumDetailsTemplate = `Respond with a JSON markdown block containing o
   {{recentMessages}}
 
   Respond with a JSON markdown block containing only the referendum ID.`;
-async function buildGetReferendumDetailsRequest(runtime, message, state) {
-  const currentState = state || await runtime.composeState(message);
-  const context = composeContext10({
-    state: currentState,
+async function buildGetReferendumDetailsRequest(runtime, _message, state) {
+  const prompt = composePromptFromState10({
+    state,
     template: referendumDetailsTemplate
   });
-  const result = await generateObject10({
-    runtime,
-    context,
-    schema: referendumDetailsSchema,
-    modelClass: ModelClass10.MEDIUM
-  });
-  const detailsData = result.object;
-  return { content: detailsData };
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType10.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText10(
+      response
+    );
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  const validatedResponse = referendumDetailsSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
+    throw new Error("Failed to extract a valid referendum ID from the message");
+  }
+  return validatedResponse.data;
 }
 function getTrackName2(trackId) {
   if (trackId === -1) {
@@ -3105,11 +3296,7 @@ var getReferendumDetails_default = {
   handler: async (runtime, message, state, _options, callback) => {
     elizaLogger14.log("Starting GET_REFERENDUM_DETAILS action...");
     try {
-      const { content: detailsContent } = await buildGetReferendumDetailsRequest(
-        runtime,
-        message,
-        state
-      );
+      const detailsContent = await buildGetReferendumDetailsRequest(runtime, message, state);
       elizaLogger14.debug("detailsContent", detailsContent);
       const action = new GetReferendumDetailsAction(runtime);
       const referendum = await action.getReferendumDetails(detailsContent.referendumId);
@@ -3217,14 +3404,14 @@ Queue Status: ${referendum.inQueue ? "In queue" : "Not in queue"}`;
   examples: [
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Show me details for referendum 586",
           action: "GET_REFERENDUM_DETAILS"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "\u{1F3DB}\uFE0F Referendum 586 Details\n\nOverview:\n\u2022 Track: medium_spender (ID: 33)\n\u2022 Status: ONGOING\n\u2022 Origin: MediumSpender\n\nProposal:\n\u2022 Hash: 0xad649d315fe4c18ce3f9b9c09c698c0c860508cb3bcccdbce5adede355a26850\n\u2022 Length: 60 bytes\n\u2022 Enactment delay: 100 blocks\n\nTimeline:\n\u2022 Submitted at block: 26316166\n\u2022 Deciding since block: 26318566\n\n\u{1F5F3}\uFE0F Voting Results:\n\u2022 Ayes: 105.0 DOT (100%)\n\u2022 Nays: 0 DOT\n\u2022 Support: 35.0 DOT\n\nDeposits:\n\u2022 Submission: 1.0 DOT by 136byv85...n5Rz\n\u2022 Decision: 200.0 DOT by 136byv85...n5Rz\n\n\u23F0 Alarm: Set for block 26721700\n\nQueue Status: Not in queue"
         }
@@ -3232,14 +3419,14 @@ Queue Status: ${referendum.inQueue ? "In queue" : "Not in queue"}`;
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "Get referendum 500 info",
           action: "GET_REFERENDUM_DETAILS"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "\u{1F3DB}\uFE0F Referendum 500 Details\n\nOverview:\n\u2022 Track: unknown (track info not preserved)\n\u2022 Status: APPROVED\n\u2022 Completed at block: 24567890\n\n\u{1F4A1} Note: This referendum has been completed. Detailed voting information and track data are not preserved on-chain for completed referenda."
         }
@@ -3247,14 +3434,14 @@ Queue Status: ${referendum.inQueue ? "In queue" : "Not in queue"}`;
     ],
     [
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "What's the status of proposal 123?",
           action: "GET_REFERENDUM_DETAILS"
         }
       },
       {
-        user: "{{user1}}",
+        name: "{{user1}}",
         content: {
           text: "\u{1F3DB}\uFE0F Referendum 123 Details\n\nOverview:\n\u2022 Track: treasurer (ID: 11)\n\u2022 Status: ONGOING\n\u2022 Origin: Treasurer\n\nProposal:\n\u2022 Hash: 0x1234567890abcdef1234567890abcdef12345678\n\u2022 Length: 45 bytes\n\u2022 Enactment delay: 50 blocks\n\nTimeline:\n\u2022 Submitted at block: 26200000\n\u2022 Deciding since block: 26202000\n\n\u{1F5F3}\uFE0F Voting Results:\n\u2022 Ayes: 5,432.1 DOT (92%)\n\u2022 Nays: 456.7 DOT\n\u2022 Support: 1,234.5 DOT\n\nDeposits:\n\u2022 Submission: 10.0 DOT by 5GrwvaEF...Xb26\n\u2022 Decision: 100.0 DOT by 5GrwvaEF...Xb26\n\nQueue Status: Not in queue"
         }
@@ -3350,6 +3537,7 @@ var ChainDataService = class {
   }
 };
 var networkDataProvider = {
+  name: "NETWORK_DATA_PROVIDER",
   async get(_runtime, _message, _state) {
     try {
       const chainDataService = new ChainDataService();
@@ -3362,22 +3550,588 @@ var networkDataProvider = {
       let output = chainDataService.formatChainInfo(chainInfo);
       if (validatorCount > 0) {
         output += `
-\u2022 Active Validators: ${validatorCount}`;
+- Active Validators: ${validatorCount}`;
       }
       if (parachainCount > 0) {
         output += `
-\u2022 Connected Parachains: ${parachainCount}`;
+- Connected Parachains: ${parachainCount}`;
       }
       elizaLogger15.info("Network Data Provider output generated", output);
-      return output;
+      return {
+        text: output,
+        data: {
+          networkInfo: chainInfo
+        }
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       elizaLogger15.error(`Error in Network Data Provider: ${message}`);
-      return "Network Data Provider: Unable to retrieve current network status.";
+      return {
+        text: "Network Data Provider: Unable to retrieve current network status.",
+        data: {
+          error: message
+        }
+      };
     }
   }
 };
 var networkData_default = networkDataProvider;
+
+// src/actions/transferFunds.ts
+import {
+  elizaLogger as elizaLogger16,
+  ModelType as ModelType11,
+  composePromptFromState as composePromptFromState11,
+  parseJSONObjectFromText as parseJSONObjectFromText11
+} from "@elizaos/core";
+import { z as z12 } from "zod";
+var transferFundsSchema = z12.object({
+  recipientAddress: z12.string(),
+  amount: z12.string(),
+  walletNumber: z12.number().optional().nullable(),
+  walletAddress: z12.string().optional().nullable(),
+  password: z12.string().optional().nullable()
+});
+var transferFundsTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
+  Example response:
+  \`\`\`json
+  {
+    "recipientAddress": "<recipient address>",
+    "amount": "<numeric amount only, without asset symbol>",
+    "walletNumber": <optional wallet number>,
+    "walletAddress": "<optional wallet address>",
+    "password": "<optional password>"
+  }
+  \`\`\`
+  
+  {{recentMessages}}
+
+  If a wallet number or address is not provided in the latest message, return null for those values.
+  If a password is not provided in the latest message, return null for the password.
+
+  IMPORTANT: For the "amount" field, extract ONLY the numeric value without any asset symbols or currency names. 
+  For example, if the user says "transfer 1000 PAS", the amount should be "1000", not "1000 PAS".
+
+  Respond with a JSON markdown block containing only the extracted values.`;
+async function buildTransferFundsDetails(runtime, message, state) {
+  const currentState = state || await runtime.composeState(message);
+  const prompt = composePromptFromState11({
+    state: currentState,
+    template: transferFundsTemplate
+  });
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType11.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText11(response);
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  const validatedResponse = transferFundsSchema.safeParse(parsedResponse);
+  if (!validatedResponse.success) {
+    throw new Error("Failed to extract a valid transfer funds details from the message");
+  }
+  return validatedResponse.data;
+}
+var TransferFundsAction = class {
+  runtime;
+  walletProvider;
+  constructor(runtime) {
+    this.runtime = runtime;
+  }
+  async initialize() {
+    this.walletProvider = await initWalletProvider(this.runtime);
+  }
+  async transferFunds(params) {
+    let targetWallet;
+    if (params.walletNumber) {
+      targetWallet = await WalletProvider.loadWalletByNumber(
+        this.walletProvider,
+        params.walletNumber,
+        params.password
+      );
+    } else if (params.walletAddress) {
+      targetWallet = await WalletProvider.loadWalletByAddress(
+        this.walletProvider,
+        params.walletAddress,
+        params.password
+      );
+    } else {
+      targetWallet = this.walletProvider;
+    }
+    const keypair = targetWallet.keyring.getPairs()[0];
+    if (!keypair) {
+      throw new Error("No keypair found in the wallet");
+    }
+    const apiService = await PolkadotApiService.start(this.runtime);
+    const api = await apiService.getConnection();
+    elizaLogger16.debug("API connection established");
+    const properties = await api.rpc.system.properties();
+    const tokenDecimals = properties.tokenDecimals.unwrap()[0].toNumber();
+    const amount = BigInt(params.amount) * BigInt(10 ** tokenDecimals);
+    const transfer = api.tx.balances.transferAllowDeath(params.recipientAddress, amount);
+    if (params.dryRun) {
+      elizaLogger16.debug(
+        `DRY RUN: Transfer of ${params.amount} DOT to ${params.recipientAddress} would be initiated.`
+      );
+      return {
+        status: "success",
+        txHash: "0xDRY_RUN_SIMULATION",
+        message: `DRY RUN: Transfer of ${params.amount} DOT to ${params.recipientAddress} would be initiated.`
+      };
+    }
+    const hash = await transfer.signAndSend(keypair);
+    elizaLogger16.debug(
+      `Transfer of ${params.amount} DOT to ${params.recipientAddress} initiated. Transaction hash: ${hash.toHex()}`
+    );
+    return {
+      status: "success",
+      txHash: hash.toHex(),
+      message: `Transfer of ${params.amount} DOT to ${params.recipientAddress} initiated. Transaction hash: ${hash.toHex()}`
+    };
+  }
+};
+var transferFunds_default = {
+  name: "POLKADOT_TRANSFER",
+  similes: [
+    "SEND_POLKADOT_FUNDS",
+    "SEND",
+    "TRANSFER_POLKADOT_FUNDS",
+    "SEND_DOT",
+    "TRANSFER",
+    "NATIVE_TRANSFER"
+  ],
+  description: "Transfers native tokens to another address.",
+  handler: async (runtime, message, state, _options, callback) => {
+    elizaLogger16.log("Starting POLKADOT_TRANSFER action...");
+    const transferFundsContent = await buildTransferFundsDetails(runtime, message, state);
+    elizaLogger16.debug("transferFundsContent", transferFundsContent);
+    if (!transferFundsContent || !transferFundsContent.recipientAddress || !transferFundsContent.amount) {
+      elizaLogger16.error("Failed to obtain required transfer details.");
+      if (callback) {
+        callback({
+          text: "Unable to process transfer request. Could not obtain recipient address or amount.",
+          content: {
+            error: "Invalid transfer request. Required details could not be determined."
+          }
+        });
+      }
+      return false;
+    }
+    try {
+      const action = new TransferFundsAction(runtime);
+      await action.initialize();
+      const result = await action.transferFunds({
+        recipientAddress: transferFundsContent.recipientAddress,
+        amount: transferFundsContent.amount,
+        walletNumber: transferFundsContent.walletNumber,
+        walletAddress: transferFundsContent.walletAddress,
+        password: transferFundsContent.password
+      });
+      if (callback) {
+        callback({
+          text: result.message,
+          content: result
+        });
+      }
+      return true;
+    } catch (error) {
+      elizaLogger16.error("Error transferring funds:", error);
+      if (callback) {
+        callback({
+          text: `Error transferring funds: ${error.message}`,
+          content: { error: error.message }
+        });
+      }
+      return false;
+    }
+  },
+  validate: async (_runtime) => true,
+  examples: [
+    [
+      {
+        name: "{{user1}}",
+        content: {
+          text: "Please transfer 1 DOT to 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty",
+          action: "POLKADOT_TRANSFER"
+        }
+      },
+      {
+        name: "{{user2}}",
+        content: {
+          text: "Transfer of 1 DOT to 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty initiated. Transaction hash: 0x..."
+        }
+      }
+    ],
+    [
+      {
+        name: "{{user1}}",
+        content: {
+          text: "Send 0.5 DOT to 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty from wallet #2",
+          action: "POLKADOT_TRANSFER"
+        }
+      },
+      {
+        name: "{{user2}}",
+        content: {
+          text: "Transfer of 0.5 DOT to 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty from wallet #2 initiated. Transaction hash: 0x..."
+        }
+      }
+    ]
+  ]
+};
+
+// src/actions/crossChainTransfer.ts
+import {
+  elizaLogger as elizaLogger17,
+  ModelType as ModelType12,
+  composePromptFromState as composePromptFromState12,
+  parseJSONObjectFromText as parseJSONObjectFromText12
+} from "@elizaos/core";
+import { AssetTransferApi, constructApiPromise } from "@substrate/asset-transfer-api";
+
+// src/utils/chainRegistryUtils.ts
+import { z as z13 } from "zod";
+var CHAIN_RPC_MAPPING = {
+  polkadot: "wss://rpc.polkadot.io",
+  paseo: "wss://rpc.paseo.io",
+  kusama: "wss://kusama-rpc.polkadot.io",
+  westend: "wss://westend-rpc.polkadot.io",
+  moonbeam: "wss://wss.api.moonbeam.network",
+  moonriver: "wss://moonriver.public.blastapi.io",
+  astar: "wss://astar-rpc.dwellir.com",
+  shiden: "wss://shiden-rpc.dwellir.com",
+  acala: "wss://acala-rpc.dwellir.com",
+  karura: "wss://karura-rpc.dwellir.com",
+  bifrost: "wss://bifrost-rpc.dwellir.com",
+  parallel: "wss://parallel-rpc.dwellir.com",
+  heiko: "wss://heiko-rpc.dwellir.com",
+  kilt: "wss://spiritnet.kilt.io",
+  phala: "wss://phala-rpc.dwellir.com",
+  khala: "wss://khala-rpc.dwellir.com",
+  crust: "wss://crust-rpc.dwellir.com",
+  unique: "wss://unique-rpc.dwellir.com",
+  quartz: "wss://quartz-rpc.dwellir.com",
+  litmus: "wss://litmus-rpc.dwellir.com",
+  robonomics: "wss://robonomics-rpc.dwellir.com",
+  subsocial: "wss://subsocial-rpc.dwellir.com",
+  zeitgeist: "wss://zeitgeist-rpc.dwellir.com",
+  basilisk: "wss://basilisk-rpc.dwellir.com",
+  hydradx: "wss://hydradx-rpc.dwellir.com",
+  altair: "wss://altair-rpc.dwellir.com",
+  kintsugi: "wss://kintsugi-rpc.dwellir.com",
+  interlay: "wss://interlay-rpc.dwellir.com",
+  centrifuge: "wss://centrifuge-rpc.dwellir.com",
+  calamari: "wss://calamari-rpc.dwellir.com",
+  manta: "wss://manta-rpc.dwellir.com",
+  turing: "wss://turing-rpc.dwellir.com",
+  integritee: "wss://integritee-rpc.dwellir.com",
+  nodle: "wss://nodle-rpc.dwellir.com",
+  efinity: "wss://efinity-rpc.dwellir.com",
+  darwinia: "wss://darwinia-rpc.dwellir.com",
+  crab: "wss://crab-rpc.dwellir.com",
+  pioneer: "wss://pioneer-rpc.dwellir.com",
+  bitcountry: "wss://bitcountry-rpc.dwellir.com",
+  subdao: "wss://subdao-rpc.dwellir.com",
+  subgame: "wss://subgame-rpc.dwellir.com",
+  subspace: "wss://subspace-rpc.dwellir.com",
+  ternoa: "wss://ternoa-rpc.dwellir.com",
+  zero: "wss://zero-rpc.dwellir.com",
+  encointer: "wss://encointer-rpc.dwellir.com",
+  kylin: "wss://kylin-rpc.dwellir.com",
+  polymesh: "wss://polymesh-rpc.dwellir.com",
+  equilibrium: "wss://equilibrium-rpc.dwellir.com",
+  chainx: "wss://chainx-rpc.dwellir.com",
+  edgeware: "wss://edgeware-rpc.dwellir.com",
+  kulupu: "wss://kulupu-rpc.dwellir.com",
+  joystream: "wss://joystream-rpc.dwellir.com",
+  dock: "wss://dock-rpc.dwellir.com",
+  stafi: "wss://stafi-rpc.dwellir.com",
+  sora: "wss://sora-rpc.dwellir.com",
+  substrate: "wss://substrate-rpc.dwellir.com"
+};
+var AssetDetailsSchema = z13.object({
+  asset: z13.string(),
+  symbol: z13.string(),
+  decimals: z13.number()
+});
+var SpecRegistrySchema = z13.record(z13.string(), AssetDetailsSchema);
+var RegistryAssetInfoEntrySchema = z13.object({
+  tokens: z13.array(z13.string()),
+  assetsInfo: z13.record(z13.string(), z13.string()),
+  foreignAssetsInfo: z13.record(z13.string(), z13.union([z13.string(), z13.record(z13.unknown())])),
+  poolPairsInfo: z13.record(z13.string(), z13.union([z13.string(), z13.record(z13.unknown())])),
+  specName: z13.string(),
+  nativeChainID: z13.string().optional(),
+  registry: z13.record(z13.string(), SpecRegistrySchema).optional()
+});
+var RegistryChainEntriesSchema = z13.record(z13.string(), RegistryAssetInfoEntrySchema);
+var FullRegistryDataSchema = z13.record(z13.string(), RegistryChainEntriesSchema);
+
+// src/actions/crossChainTransfer.ts
+import { z as z14 } from "zod";
+var crossChainTransferSchema = z14.object({
+  recipientAddress: z14.string(),
+  amount: z14.string(),
+  sourceChain: z14.string(),
+  destinationChain: z14.string(),
+  destinationParachainId: z14.string(),
+  assetId: z14.string(),
+  walletNumber: z14.number().optional().nullable(),
+  walletAddress: z14.string().optional().nullable(),
+  password: z14.string().optional().nullable()
+});
+var crossChainTransferTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
+    Example response:
+    \`\`\`json
+    {
+      "recipientAddress": "<recipient address>",
+      "amount": "<numeric amount only, without asset symbol>",
+      "sourceChain": "<source chain name>",
+      "destinationChain": "<destination chain name>",
+      "destinationParachainId": "<destination parachain id>",
+      "assetId": "<asset symbol>",
+      "walletNumber": <optional wallet number>,
+      "walletAddress": "<optional wallet address>",
+      "password": "<optional password>"
+    }
+    \`\`\`
+    
+    {{recentMessages}}
+  
+    If a wallet number or address is not provided in the latest message, return null for those values.
+    If a password is not provided in the latest message, return null for the password.
+    If source chain is not provided, it will default to "polkadot".
+  
+    IMPORTANT: For the "amount" field, extract ONLY the numeric value without any asset symbols or currency names. 
+    For example, if the user says "transfer 1000 PAS", the amount should be "1000", not "1000 PAS".
+  
+    Respond with a JSON markdown block containing only the extracted values.`;
+async function buildCrossChainTransferDetails(runtime, _message, state) {
+  const prompt = composePromptFromState12({
+    state,
+    template: crossChainTransferTemplate
+  });
+  const parsedResponse = null;
+  for (let i = 0; i < 5; i++) {
+    const response = await runtime.useModel(ModelType12.TEXT_SMALL, {
+      prompt
+    });
+    const parsedResponse2 = parseJSONObjectFromText12(
+      response
+    );
+    if (parsedResponse2) {
+      break;
+    }
+  }
+  return parsedResponse;
+}
+var CrossChainTransferAction = class {
+  runtime;
+  walletProvider;
+  api;
+  assetApi;
+  // Using any temporarily to avoid type conflicts
+  currentRpcUrl;
+  sourceChainName;
+  constructor(runtime) {
+    this.runtime = runtime;
+  }
+  async initialize(sourceChain) {
+    this.sourceChainName = sourceChain;
+    this.walletProvider = await initWalletProvider(this.runtime);
+    const chainName = sourceChain.toLowerCase();
+    this.currentRpcUrl = CHAIN_RPC_MAPPING[chainName];
+    if (!this.currentRpcUrl) {
+      throw new Error(`RPC URL not found for chain: ${sourceChain}`);
+    }
+    const { api, specName, safeXcmVersion } = await constructApiPromise(this.currentRpcUrl);
+    this.api = api;
+    this.assetApi = new AssetTransferApi(api, specName, safeXcmVersion);
+  }
+  async transferFunds(params, dryRun = false) {
+    let targetWallet;
+    if (params.walletNumber) {
+      targetWallet = await WalletProvider.loadWalletByNumber(
+        this.walletProvider,
+        params.walletNumber,
+        params.password
+      );
+    } else if (params.walletAddress) {
+      targetWallet = await WalletProvider.loadWalletByAddress(
+        this.walletProvider,
+        params.walletAddress,
+        params.password
+      );
+    } else {
+      targetWallet = this.walletProvider;
+    }
+    const keypair = targetWallet.keyring.getPairs()[0];
+    if (!keypair) {
+      throw new Error("No keypair found in the wallet");
+    }
+    const callInfo = await this.assetApi.createTransferTransaction(
+      params.destinationParachainId,
+      params.recipientAddress,
+      params.assetId ? [params.assetId] : [],
+      [params.amount],
+      {
+        format: "call",
+        xcmVersion: this.assetApi.safeXcmVersion
+      }
+    );
+    elizaLogger17.debug("Transfer transaction created:", {
+      callInfoTx: callInfo.tx
+    });
+    elizaLogger17.log("Attempting to dry run the transaction...");
+    const dryRunResult = await this.assetApi.dryRunCall(
+      keypair.address,
+      callInfo.tx,
+      "call",
+      this.assetApi.safeXcmVersion
+    );
+    if (dryRunResult === null) {
+      elizaLogger17.warn("Dry run did not return a result. Proceeding with caution.");
+    } else if (dryRunResult.isErr) {
+      elizaLogger17.error("Transaction dry run failed:", dryRunResult.asErr.toHuman());
+      throw new Error(`Transaction dry run failed: ${dryRunResult.asErr.toString()}`);
+    } else {
+      elizaLogger17.log("Transaction dry run successful:", dryRunResult.asOk.toHuman());
+    }
+    let decodedTxString = void 0;
+    try {
+      decodedTxString = this.assetApi.decodeExtrinsic(callInfo.tx, "call");
+      elizaLogger17.debug("Decoded transaction:", JSON.parse(decodedTxString));
+    } catch (decodeError) {
+      elizaLogger17.warn("Failed to decode transaction:", decodeError);
+    }
+    if (dryRun) {
+      return {
+        status: "success",
+        message: `Dry run of cross-chain transfer of ${params.amount} ${params.assetId} from ${this.sourceChainName} to ${params.recipientAddress} on ${params.destinationChain} initiated.`
+      };
+    }
+    const submitableTransaction = await this.assetApi.createTransferTransaction(
+      params.destinationParachainId,
+      params.recipientAddress,
+      params.assetId ? [params.assetId] : [],
+      [params.amount],
+      {
+        format: "submittable",
+        xcmVersion: this.assetApi.safeXcmVersion
+      }
+    );
+    elizaLogger17.log("Signing and sending the transaction...");
+    let hash = void 0;
+    const unsub = await submitableTransaction.tx.signAndSend(keypair, (result) => {
+      console.log(`Current status is ${result.status}`);
+      if (result.status.isInBlock) {
+        console.log(`Transaction included at blockHash ${result.status.asInBlock}`);
+      } else if (result.status.isFinalized) {
+        console.log(`Transaction included at blockHash ${result.status.asFinalized}`);
+        hash = result.txHash.toHex();
+        unsub();
+      }
+    });
+    return {
+      status: "success",
+      txHash: hash,
+      message: `Cross-chain transfer of ${params.amount} ${params.assetId} from ${this.sourceChainName} to ${params.recipientAddress} on ${params.destinationChain} initiated.`,
+      decodedTx: decodedTxString
+    };
+  }
+};
+var crossChainTransfer_default = {
+  name: "CROSS_CHAIN_TRANSFER",
+  similes: ["CROSS_CHAIN_SEND", "XCM_TRANSFER"],
+  description: "Transfers tokens across different chains in the Polkadot ecosystem using XCM. Supports transfers between relay chains and parachains.",
+  handler: async (runtime, message, state, _options, callback) => {
+    elizaLogger17.log("Starting CROSS_CHAIN_TRANSFER action...");
+    const transferContent = await buildCrossChainTransferDetails(runtime, message, state);
+    elizaLogger17.debug("crossChainTransferContent", transferContent);
+    if (!transferContent || !transferContent.recipientAddress || !transferContent.amount || !transferContent.destinationChain) {
+      elizaLogger17.error("Failed to obtain required transfer details.");
+      if (callback) {
+        callback({
+          text: "Unable to process cross-chain transfer request. Could not obtain required details.",
+          content: {
+            error: "Invalid transfer request. Required details could not be determined."
+          }
+        });
+      }
+      return false;
+    }
+    try {
+      const action = new CrossChainTransferAction(runtime);
+      await action.initialize(transferContent.sourceChain);
+      const result = await action.transferFunds({
+        recipientAddress: transferContent.recipientAddress,
+        amount: transferContent.amount,
+        destinationChain: transferContent.destinationChain,
+        destinationParachainId: transferContent.destinationParachainId,
+        assetId: transferContent.assetId,
+        walletNumber: transferContent.walletNumber,
+        walletAddress: transferContent.walletAddress,
+        password: transferContent.password
+      });
+      if (callback) {
+        callback({
+          text: result.message,
+          content: {
+            status: result.status,
+            message: result.message,
+            decodedTx: result.decodedTx
+          }
+        });
+      }
+      return true;
+    } catch (error) {
+      elizaLogger17.error("Error in cross-chain transfer:", error);
+      if (callback) {
+        callback({
+          text: `Error in cross-chain transfer: ${error.message}`,
+          content: { error: error.message }
+        });
+      }
+      return false;
+    }
+  },
+  validate: async (_runtime) => true,
+  examples: [
+    [
+      {
+        name: "{{user1}}",
+        content: {
+          text: "Please transfer 1 DOT from Polkadot to Moonbeam address 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty",
+          action: "CROSS_CHAIN_TRANSFER"
+        }
+      },
+      {
+        name: "{{user2}}",
+        content: {
+          text: "Cross-chain transfer of 1 DOT from Polkadot to 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty on Moonbeam initiated. Transaction hash: 0x..."
+        }
+      }
+    ],
+    [
+      {
+        name: "{{user1}}",
+        content: {
+          text: "Send 0.5 GLMR from Moonbeam to 0xF977814e90dA44bFA03b6295A0616a897441aceC on Moonriver from wallet #2",
+          action: "CROSS_CHAIN_TRANSFER"
+        }
+      },
+      {
+        name: "{{user2}}",
+        content: {
+          text: "Cross-chain transfer of 0.5 GLMR from Moonbeam to 0xF977814e90dA44bFA03b6295A0616a897441aceC on Moonriver from wallet #2 initiated. Transaction hash: 0x..."
+        }
+      }
+    ]
+  ]
+};
 
 // src/index.ts
 var polkadotPlugin = {
@@ -3393,7 +4147,9 @@ var polkadotPlugin = {
     getBlockEvents_default,
     getReferenda_default,
     getReferendumDetails_default,
-    validateSignature_default
+    validateSignature_default,
+    transferFunds_default,
+    crossChainTransfer_default
   ],
   evaluators: [],
   providers: [nativeWalletProvider, networkData_default]
@@ -3401,6 +4157,7 @@ var polkadotPlugin = {
 var index_default = polkadotPlugin;
 export {
   createWallet_default as CreatePolkadotWallet,
+  crossChainTransfer_default as CrossChainTransfer,
   ejectWallet_default as EjectPolkadotWallet,
   getBalance_default as GetBalance,
   getBlockEvents_default as GetBlockEvents,
@@ -3409,6 +4166,7 @@ export {
   getReferendumDetails_default as GetReferendumDetails,
   loadWallet_default as LoadPolkadotWallet,
   signMessage_default as SignPolkadotMessage,
+  transferFunds_default as TransferPolkadotFunds,
   validateSignature_default as ValidateSignature,
   WalletProvider,
   index_default as default,
