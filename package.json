@@ -1,6 +1,6 @@
 {
   "name": "@esscrypt/plugin-polkadot",
-  "version": "0.0.3",
+  "version": "1.0.10",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -13,7 +13,6 @@
     "./package.json": "./package.json",
     ".": {
       "import": {
-        "@elizaos/source": "./src/index.ts",
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       }
@@ -51,7 +50,6 @@
   "peerDependencies": {
     "whatwg-url": "7.1.0"
   },
-  "packageManager": "pnpm@9.15.0",
   "packageType": "plugin",
   "platform": "node",
   "agentConfig": {
@@ -59,15 +57,21 @@
     "pluginParameters": {
       "COINMARKETCAP_API_KEY": {
         "type": "string",
-        "description": "The API key for the CoinMarketCap API"
+        "description": "The API key for the CoinMarketCap API",
+        "required": false,
+        "sensitive": true
       },
       "POLKADOT_RPC_URL": {
         "type": "string",
-        "description": "The URL of the Polkadot RPC endpoint"
+        "description": "The URL of the Polkadot RPC endpoint",
+        "required": false,
+        "sensitive": true
       },
       "POLKADOT_PRIVATE_KEY": {
         "type": "string",
-        "description": "The private key for the Polkadot wallet"
+        "description": "The private key for the Polkadot wallet",
+        "required": false,
+        "sensitive": false
       }
     }
   },
