@@ -286,4 +286,3 @@ For more information about Polkadot:
 ## License
 
 This plugin is part of the Eliza project. See the main project repository for license information.
->>>>>>> 7d41f01 (Initial commit from ElizaOS CLI)
