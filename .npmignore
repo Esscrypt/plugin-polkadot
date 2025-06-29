@@ -1,5 +1,9 @@
-node_modules
-.turbo
+*
+
+!dist/**
+!package.json
+!readme.md
+!tsup.config.ts
 
 test_wallet_backups/
 

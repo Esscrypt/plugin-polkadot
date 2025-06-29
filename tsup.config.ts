@@ -16,13 +16,8 @@ export default defineConfig({
         "dotenv",
         "fs",
         "path",
-        "@reflink/reflink",
-        "@node-llama-cpp",
         "https",
         "http",
-        "agentkeepalive",
-        "bignumber.js",
         "zod",
-        "node-cache"
     ],
 });

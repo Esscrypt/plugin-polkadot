@@ -2,6 +2,30 @@
 
 A plugin for handling Polkadot blockchain operations, providing wallet management and price fetching capabilities.
 
+### Usage
+---
+Add the plugin to your character configuration:
+
+```
+"plugins": ["@elizaos-plugins/plugin-polkadot"]
+```
+## Configuration
+The plugin requires these environment variables (can be set in .env file or character settings):
+```env
+"settings": {
+  "POLKADOT_RPC_URL": "rpc-url",
+  "COINMARKETCAP_API_KEY": "<api-key>",
+  "POLKADOT_PRIVATE_KEY": "<private_key>"
+}
+```
+Or in .env file:
+
+```env
+POLKADOT_RPC_URL=your_polkadot_rpc_endpoint  # Optional - defaults to wss://rpc.polkadot.io
+COINMARKETCAP_API_KEY=your_cmc_api_key     # Optional - for fetching token prices
+POLKADOT_PRIVATE_KEY=your_mnemonic_phrase  # Optional - for default wallet initialization via initWalletProvider
+```
+
 ## Overview
 
 This plugin provides functionality to:
@@ -23,59 +47,7 @@ This plugin provides functionality to:
 
 ### Screenshot
 
-### Quick Start
-
-```bash
-# Ensure you have Node.js and pnpm installed
-# nvm use 23 && npm install -g pnpm
-
-# Set required environment variables (see Configuration section)
-export POLKADOT_RPC_URL="wss://rpc.polkadot.io"
-export COINMARKETCAP_API_KEY="your_coinmarketcap_api_key"
-# Optional: POLKADOT_PRIVATE_KEY="your_mnemonic_phrase_for_default_wallet_initialization"
-
-# Run the debug script (if available)
-# bash ./packages/plugin-polkadot/scripts/debug.sh
-```
-
-## Getting Started
-
-### New to ElizaOS
-
-To test this plugin with ElizaOS from scratch, follow these steps:
-
-1. Clone the ElizaOS monorepo: https://github.com/elizaOS/eliza
-2. Inside packages, clone the polkadot-plugin repo: https://github.com/Esscrypt/plugin-polkadot
-3. Inside the characters folder, link the plugin. example character file: https://gist.github.com/mikirov/74ec0c51255050562b2bdd63ccfc36fb
-4. Inside agent folder, add `"@elizaos/plugin-polkadot": "workspace:*"` to the dependencies section in package.json
-5. Follow install and build instructions: `pnpm install --no-frozen-lockfile && pnpm build`
-6. Start WEB UI: `pnpm start:client`
-7. Start Agent: `pnpm start --characters="characters/dobby.character.json"`
-8. (Optional) set .env with **POLKADOT_PRIVATE_KEY** and **POLKADOT_RPC_URL**
-
-> Note: When starting the Agent, if **POLKADOT_PRIVATE_KEY** is not set, an error will pop up, but the agent will still run and expect a wallet to get created by the user
-
-9. Go to [http://localhost:5173/](http://localhost:5173/) and interact with the agent.
-
-### Existing ElizaOS Users
-
-```bash
-npm install @elizaos/plugin-polkadot
-# or
-pnpm add @elizaos/plugin-polkadot
-```
-
-## Configuration
-
-The plugin requires the following environment variables:
-
-```env
-POLKADOT_RPC_URL=your_polkadot_rpc_endpoint  # Optional - defaults to wss://rpc.polkadot.io
-COINMARKETCAP_API_KEY=your_cmc_api_key     # Optional - for fetching token prices
-POLKADOT_PRIVATE_KEY=your_mnemonic_phrase  # Optional - for default wallet initialization via initWalletProvider
-```
-
-## Usage
+## Code Usage
 
 Import and register the plugin in your Eliza configuration:
 
@@ -99,38 +71,38 @@ import { WalletProvider, initWalletProvider, WalletSourceType, type WalletProvid
 import type { IAgentRuntime } from "@elizaos/core";
 
 // Initialize the provider (e.g., from environment settings if POLKADOT_PRIVATE_KEY is set)
-// const walletProvider = await initWalletProvider(runtime);
+const walletProvider = await initWalletProvider(runtime);
 
 // Or create/import a wallet:
 // 1. Generate a new wallet and save its encrypted backup
-// const { walletProvider, mnemonic, encryptedBackup } = await WalletProvider.generateNew(
-//   "wss://rpc.polkadot.io",
-//   "your-strong-password",
-//   runtime.cacheManager
-// );
-// console.log("New Mnemonic (SAVE THIS SECURELY!):", mnemonic);
+const { walletProvider, mnemonic, encryptedBackup } = await WalletProvider.generateNew(
+  "wss://rpc.polkadot.io",
+  "your-strong-password",
+  runtime.cacheManager
+);
+console.log("New Mnemonic (SAVE THIS SECURELY!):", mnemonic);
 
 // 2. Import from mnemonic
-// const paramsMnemonic: WalletProviderConstructionParams = {
-//   rpcUrl: "wss://rpc.polkadot.io",
-//   cacheManager: runtime.cacheManager,
-//   source: {
-//     type: WalletSourceType.FROM_MNEMONIC,
-//     mnemonic: "your twelve or twenty-four word mnemonic phrase",
-//   }
-// };
-// const walletFromMnemonic = new WalletProvider(paramsMnemonic);
+const paramsMnemonic: WalletProviderConstructionParams = {
+  rpcUrl: "wss://rpc.polkadot.io",
+  cacheManager: runtime.cacheManager,
+  source: {
+    type: WalletSourceType.FROM_MNEMONIC,
+    mnemonic: "your twelve or twenty-four word mnemonic phrase",
+  }
+};
+const walletFromMnemonic = new WalletProvider(paramsMnemonic);
 
 // Get wallet address
-// const address = walletProvider.getAddress();
+const address = walletProvider.getAddress();
 
 // Get formatted portfolio (currently uses placeholder balance)
-// const portfolio = await walletProvider.getFormattedPortfolio(runtime);
-// console.log(portfolio);
+const portfolio = await walletProvider.getFormattedPortfolio(runtime);
+console.log(portfolio);
 
 // Fetch prices
-// const prices = await walletProvider.fetchPrices();
-// console.log("Current DOT price:", prices.nativeToken.usd.toString());
+const prices = await walletProvider.fetchPrices();
+console.log("Current DOT price:", prices.nativeToken.usd.toString());
 ```
 
 ### Create Polkadot Wallet Action
@@ -145,16 +117,16 @@ import { CreateWalletAction } from "@elizaos/plugin-polkadot/src/actions/createW
 import type { IAgentRuntime } from "@elizaos/core";
 
 // Assuming 'runtime' is an IAgentRuntime instance
-// const rpcUrl = runtime.getSetting("POLKADOT_RPC_URL") || "wss://rpc.polkadot.io";
-// const action = new CreateWalletAction(runtime);
+const rpcUrl = runtime.getSetting("POLKADOT_RPC_URL") || "wss://rpc.polkadot.io";
+const action = new CreateWalletAction(runtime);
 
-// const { walletAddress, mnemonic } = await action.createWallet({
-//   rpcUrl,
-//   encryptionPassword: "user-provided-strong-password",
-// });
+const { walletAddress, mnemonic } = await action.createWallet({
+  rpcUrl,
+  encryptionPassword: "user-provided-strong-password",
+});
 
-// console.log("Wallet Address:", walletAddress);
-// console.log("Mnemonic (store securely!):", mnemonic);
+console.log("Wallet Address:", walletAddress);
+console.log("Mnemonic (store securely!):", mnemonic);
 // A file backup is also created in 'polkadot_wallet_backups' directory.
 ```
 
