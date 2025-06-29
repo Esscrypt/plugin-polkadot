@@ -2,7 +2,6 @@ import type { IAgentRuntime } from '@elizaos/core';
 import { describe, it, vi, beforeEach, expect, afterEach } from 'vitest';
 import { ImportWalletAction, type ImportWalletContent } from '../actions/importWallet';
 import { WalletProvider, PROVIDER_CONFIG, WalletSourceType } from '../providers/wallet';
-import { CONFIG_KEYS } from '../enviroment';
 import { CacheManager } from '../utils/cache';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -18,7 +17,6 @@ describe('ImportWalletAction', () => {
 
     beforeEach(async () => {
         vi.clearAllMocks();
-        process.env[CONFIG_KEYS.USE_CACHE_MANAGER] = 'true';
 
         testBackupDir = path.join(process.cwd(), 'import_wallet_test_wallet_backups');
         if (fs.existsSync(testBackupDir)) {
@@ -50,7 +48,6 @@ describe('ImportWalletAction', () => {
         if (fs.existsSync(testBackupDir)) {
             fs.rmSync(testBackupDir, { recursive: true, force: true });
         }
-        delete process.env[CONFIG_KEYS.USE_CACHE_MANAGER];
         vi.restoreAllMocks();
     });
 

@@ -3,7 +3,6 @@ import { elizaLogger } from '@elizaos/core';
 
 import * as path from 'node:path'; // Changed to use node: protocol
 import type BigNumber from 'bignumber.js';
-import { CONFIG_KEYS } from '../enviroment';
 
 import { Keyring } from '@polkadot/keyring';
 import { cryptoWaitReady, mnemonicGenerate } from '@polkadot/util-crypto';
@@ -121,7 +120,7 @@ export class WalletProvider {
 
     constructor(params: WalletProviderConstructionParams) {
         this.runtime = params.runtime;
-        this.coinMarketCapApiKey = process.env.COINMARKETCAP_API_KEY || '';
+        this.coinMarketCapApiKey = this.runtime.getSetting('COINMARKETCAP_API_KEY');
         if (!this.coinMarketCapApiKey) {
             elizaLogger.warn('COINMARKETCAP_API_KEY is not set. Price fetching will likely fail.');
         }
@@ -917,16 +916,16 @@ export class WalletProvider {
 }
 
 export const initWalletProvider = async (runtime: IAgentRuntime) => {
-    let mnemonic = runtime.getSetting(CONFIG_KEYS.POLKADOT_PRIVATE_KEY);
+    let mnemonic = runtime.getSetting('POLKADOT_PRIVATE_KEY');
     if (!mnemonic) {
-        elizaLogger.error(`${CONFIG_KEYS.POLKADOT_PRIVATE_KEY} is missing`);
+        elizaLogger.error('POLKADOT_PRIVATE_KEY is missing; using random mnemonic');
         mnemonic = mnemonicGenerate(24);
     }
 
     const mnemonicsArray = mnemonic.split(' ');
     if (mnemonicsArray.length < 12 || mnemonicsArray.length > 24) {
         throw new Error(
-            `${CONFIG_KEYS.POLKADOT_PRIVATE_KEY} mnemonic seems invalid (length: ${mnemonicsArray.length})`,
+            `POLKADOT_PRIVATE_KEY mnemonic seems invalid (length: ${mnemonicsArray.length})`,
         );
     }
 

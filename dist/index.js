@@ -5,29 +5,9 @@ import { elizaLogger as elizaLogger4, ModelType } from "@elizaos/core";
 // src/providers/wallet.ts
 import { elizaLogger as elizaLogger3 } from "@elizaos/core";
 import * as path from "node:path";
-
-// src/enviroment.ts
-import { z } from "zod";
-var CONFIG_KEYS = {
-  POLKADOT_PRIVATE_KEY: "POLKADOT_PRIVATE_KEY",
-  POLKADOT_RPC_URL: "POLKADOT_RPC_URL",
-  POLKADOT_RPC_API_KEY: "POLKADOT_RPC_API_KEY",
-  POLKADOT_MANIFEST_URL: "POLKADOT_MANIFEST_URL",
-  POLKADOT_BRIDGE_URL: "POLKADOT_BRIDGE_URL",
-  USE_CACHE_MANAGER: "USE_CACHE_MANAGER"
-};
-var envSchema = z.object({
-  POLKADOT_PRIVATE_KEY: z.string().min(1, "private key is required"),
-  POLKADOT_RPC_URL: z.string(),
-  POLKADOT_RPC_API_KEY: z.string(),
-  POLKADOT_MANIFEST_URL: z.string(),
-  POLKADOT_BRIDGE_URL: z.string()
-});
-
-// src/providers/wallet.ts
 import { Keyring } from "@polkadot/keyring";
 import { cryptoWaitReady, mnemonicGenerate } from "@polkadot/util-crypto";
-import { z as z2 } from "zod";
+import { z } from "zod";
 import fs from "node:fs";
 
 // src/utils/wallet.ts
@@ -204,21 +184,21 @@ var PROVIDER_CONFIG = {
   // substrate generic, 2 for kusama, 0 for polkadot
 };
 var WALLET_CACHE_KEY = "polkadot/wallets";
-var keyringOptionsSchema = z2.object({
-  type: z2.enum(["ed25519", "sr25519", "ecdsa"]).optional(),
+var keyringOptionsSchema = z.object({
+  type: z.enum(["ed25519", "sr25519", "ecdsa"]).optional(),
   // Made optional to handle potential older backups
-  ss58Format: z2.number().optional(),
+  ss58Format: z.number().optional(),
   // Made optional for flexibility
-  genesisHash: z2.union([z2.string(), z2.instanceof(Uint8Array)]).optional()
+  genesisHash: z.union([z.string(), z.instanceof(Uint8Array)]).optional()
   // parentAddress: z.string().optional(), // Add if needed, keeping it simple for now
 });
-var decryptedWalletBackupDataSchema = z2.object({
-  mnemonic: z2.string().min(12),
+var decryptedWalletBackupDataSchema = z.object({
+  mnemonic: z.string().min(12),
   // Basic mnemonic validation
   options: keyringOptionsSchema,
-  password: z2.string().optional(),
-  hardDerivation: z2.string().optional(),
-  softDerivation: z2.string().optional()
+  password: z.string().optional(),
+  hardDerivation: z.string().optional(),
+  softDerivation: z.string().optional()
 });
 var WalletProvider = class _WalletProvider {
   runtime;
@@ -228,7 +208,7 @@ var WalletProvider = class _WalletProvider {
   source;
   constructor(params) {
     this.runtime = params.runtime;
-    this.coinMarketCapApiKey = process.env.COINMARKETCAP_API_KEY || "";
+    this.coinMarketCapApiKey = this.runtime.getSetting("COINMARKETCAP_API_KEY");
     if (!this.coinMarketCapApiKey) {
       elizaLogger3.warn("COINMARKETCAP_API_KEY is not set. Price fetching will likely fail.");
     }
@@ -833,15 +813,15 @@ var WalletProvider = class _WalletProvider {
   }
 };
 var initWalletProvider = async (runtime) => {
-  let mnemonic = runtime.getSetting(CONFIG_KEYS.POLKADOT_PRIVATE_KEY);
+  let mnemonic = runtime.getSetting("POLKADOT_PRIVATE_KEY");
   if (!mnemonic) {
-    elizaLogger3.error(`${CONFIG_KEYS.POLKADOT_PRIVATE_KEY} is missing`);
+    elizaLogger3.error("POLKADOT_PRIVATE_KEY is missing; using random mnemonic");
     mnemonic = mnemonicGenerate(24);
   }
   const mnemonicsArray = mnemonic.split(" ");
   if (mnemonicsArray.length < 12 || mnemonicsArray.length > 24) {
     throw new Error(
-      `${CONFIG_KEYS.POLKADOT_PRIVATE_KEY} mnemonic seems invalid (length: ${mnemonicsArray.length})`
+      `POLKADOT_PRIVATE_KEY mnemonic seems invalid (length: ${mnemonicsArray.length})`
     );
   }
   const keyringOptions = {
@@ -887,12 +867,12 @@ var nativeWalletProvider = {
 };
 
 // src/actions/createWallet.ts
-import { z as z3 } from "zod";
-var passwordSchema = z3.object({
-  encryptionPassword: z3.string().optional().nullable(),
-  keypairPassword: z3.string().optional().nullable(),
-  hardDerivation: z3.string().optional().nullable(),
-  softDerivation: z3.string().optional().nullable()
+import { z as z2 } from "zod";
+var passwordSchema = z2.object({
+  encryptionPassword: z2.string().optional().nullable(),
+  keypairPassword: z2.string().optional().nullable(),
+  hardDerivation: z2.string().optional().nullable(),
+  softDerivation: z2.string().optional().nullable()
 });
 var passwordTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
   Example response:
@@ -1089,14 +1069,14 @@ import {
   composePromptFromState as composePromptFromState2,
   parseJSONObjectFromText as parseJSONObjectFromText2
 } from "@elizaos/core";
-import { z as z4 } from "zod";
+import { z as z3 } from "zod";
 function isEjectWalletContent(content) {
   return (typeof content.password === "string" || content.password === void 0 || content.password === null) && (typeof content.walletAddress === "string" || content.walletAddress === void 0 || content.walletAddress === null) && (typeof content.walletNumber === "number" || content.walletNumber === void 0 || content.walletNumber === null);
 }
-var ejectWalletSchema = z4.object({
-  password: z4.string().optional().nullable(),
-  walletAddress: z4.string().optional().nullable(),
-  walletNumber: z4.number().optional().nullable()
+var ejectWalletSchema = z3.object({
+  password: z3.string().optional().nullable(),
+  walletAddress: z3.string().optional().nullable(),
+  walletNumber: z3.number().optional().nullable()
 });
 var ejectWalletTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
 Example response:
@@ -1277,15 +1257,15 @@ import {
   parseJSONObjectFromText as parseJSONObjectFromText3
 } from "@elizaos/core";
 import { stringToU8a as stringToU8a2, u8aToHex as u8aToHex2 } from "@polkadot/util";
-import { z as z5 } from "zod";
+import { z as z4 } from "zod";
 function isSignMessageContent(content) {
   return typeof content.messageToSign === "string";
 }
-var signMessageSchema = z5.object({
-  messageToSign: z5.string().min(1, "Message to sign cannot be empty."),
-  walletNumber: z5.number().optional().nullable(),
-  walletAddress: z5.string().optional().nullable(),
-  walletPassword: z5.string().optional().nullable()
+var signMessageSchema = z4.object({
+  messageToSign: z4.string().min(1, "Message to sign cannot be empty."),
+  walletNumber: z4.number().optional().nullable(),
+  walletAddress: z4.string().optional().nullable(),
+  walletPassword: z4.string().optional().nullable()
 });
 var signMessageTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
 Example response:
@@ -1469,14 +1449,14 @@ import {
   composePromptFromState as composePromptFromState4,
   parseJSONObjectFromText as parseJSONObjectFromText4
 } from "@elizaos/core";
-import { z as z6 } from "zod";
+import { z as z5 } from "zod";
 function isLoadWalletContent(content) {
   return (typeof content.walletNumber === "number" || content.walletNumber === void 0 || content.walletNumber === null) && (typeof content.walletAddress === "string" || content.walletAddress === void 0 || content.walletAddress === null) && (typeof content.walletPassword === "string" || content.walletPassword === void 0 || content.walletPassword === null);
 }
-var loadWalletSchema = z6.object({
-  walletNumber: z6.number().optional().nullable(),
-  walletAddress: z6.string().optional().nullable(),
-  walletPassword: z6.string().optional().nullable()
+var loadWalletSchema = z5.object({
+  walletNumber: z5.number().optional().nullable(),
+  walletAddress: z5.string().optional().nullable(),
+  walletPassword: z5.string().optional().nullable()
 });
 var loadWalletTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
 Example response:
@@ -1631,13 +1611,13 @@ import {
   parseJSONObjectFromText as parseJSONObjectFromText5
 } from "@elizaos/core";
 import { stringToU8a as stringToU8a3, hexToU8a as hexToU8a2 } from "@polkadot/util";
-import { z as z7 } from "zod";
-var validateSignatureSchema = z7.object({
-  message: z7.string().min(1, "Message cannot be empty."),
-  signature: z7.string().min(1, "Signature cannot be empty."),
-  walletNumber: z7.number().optional().nullable(),
-  walletPassword: z7.string().optional().nullable(),
-  walletAddress: z7.string().optional().nullable()
+import { z as z6 } from "zod";
+var validateSignatureSchema = z6.object({
+  message: z6.string().min(1, "Message cannot be empty."),
+  signature: z6.string().min(1, "Signature cannot be empty."),
+  walletNumber: z6.number().optional().nullable(),
+  walletPassword: z6.string().optional().nullable(),
+  walletAddress: z6.string().optional().nullable()
 });
 var validateSignatureTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
 Example response:
@@ -1844,7 +1824,7 @@ import {
   composePromptFromState as composePromptFromState6,
   parseJSONObjectFromText as parseJSONObjectFromText6
 } from "@elizaos/core";
-import { z as z8 } from "zod";
+import { z as z7 } from "zod";
 import { formatBalance } from "@polkadot/util";
 
 // src/services/api-service.ts
@@ -1889,7 +1869,7 @@ var PolkadotApiService = class _PolkadotApiService extends Service {
     _PolkadotApiService._instance = null;
   }
   async initialize() {
-    const customEndpoint = this.runtime.getSetting(CONFIG_KEYS.POLKADOT_RPC_URL) || process.env.POLKADOT_RPC_URL;
+    const customEndpoint = this.runtime.getSetting("POLKADOT_RPC_URL");
     if (customEndpoint) {
       this.networkConfig.DEFAULT_ENDPOINT = customEndpoint;
       elizaLogger9.debug(`Using custom Polkadot endpoint: ${customEndpoint}`);
@@ -2019,8 +1999,8 @@ var PolkadotApiService = class _PolkadotApiService extends Service {
 };
 
 // src/actions/getBalance.ts
-var getBalanceSchema = z8.object({
-  address: z8.string().min(1, "Address is required")
+var getBalanceSchema = z7.object({
+  address: z7.string().min(1, "Address is required")
 });
 var addressTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
   Example response:
@@ -2226,9 +2206,9 @@ import {
   composePromptFromState as composePromptFromState7,
   parseJSONObjectFromText as parseJSONObjectFromText7
 } from "@elizaos/core";
-import { z as z9 } from "zod";
-var blockInfoSchema = z9.object({
-  blockNumberOrHash: z9.string().min(1, "Block number or hash is required")
+import { z as z8 } from "zod";
+var blockInfoSchema = z8.object({
+  blockNumberOrHash: z8.string().min(1, "Block number or hash is required")
 });
 var blockInfoTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
   Example response:
@@ -2447,11 +2427,11 @@ import {
   composePromptFromState as composePromptFromState8,
   parseJSONObjectFromText as parseJSONObjectFromText8
 } from "@elizaos/core";
-import { z as z10 } from "zod";
-var blockEventsSchema = z10.object({
-  blockNumberOrHash: z10.string().min(1, "Block number or hash is required"),
-  filterModule: z10.string().optional().nullable().transform((val) => val === "null" || val === null ? void 0 : val),
-  limit: z10.union([z10.number(), z10.string()]).optional().nullable().transform((val) => {
+import { z as z9 } from "zod";
+var blockEventsSchema = z9.object({
+  blockNumberOrHash: z9.string().min(1, "Block number or hash is required"),
+  filterModule: z9.string().optional().nullable().transform((val) => val === "null" || val === null ? void 0 : val),
+  limit: z9.union([z9.number(), z9.string()]).optional().nullable().transform((val) => {
     if (val === "null" || val === null || val === void 0) return void 0;
     const num = typeof val === "string" ? parseInt(val) : val;
     return Number.isNaN(num) ? void 0 : Math.min(Math.max(num, 1), 1e3);
@@ -2765,9 +2745,9 @@ import {
   composePromptFromState as composePromptFromState9,
   parseJSONObjectFromText as parseJSONObjectFromText9
 } from "@elizaos/core";
-import { z as z11 } from "zod";
-var referendaSchema = z11.object({
-  limit: z11.union([z11.number(), z11.string()]).optional().nullable().transform((val) => {
+import { z as z10 } from "zod";
+var referendaSchema = z10.object({
+  limit: z10.union([z10.number(), z10.string()]).optional().nullable().transform((val) => {
     if (val === "null" || val === null || val === void 0) return void 0;
     const num = typeof val === "string" ? parseInt(val) : val;
     return Number.isNaN(num) ? void 0 : Math.min(Math.max(num, 1), 50);
@@ -3085,9 +3065,9 @@ import {
   composePromptFromState as composePromptFromState10,
   parseJSONObjectFromText as parseJSONObjectFromText10
 } from "@elizaos/core";
-import { z as z12 } from "zod";
-var referendumDetailsSchema = z12.object({
-  referendumId: z12.union([z12.number(), z12.string()]).transform((val) => {
+import { z as z11 } from "zod";
+var referendumDetailsSchema = z11.object({
+  referendumId: z11.union([z11.number(), z11.string()]).transform((val) => {
     const num = typeof val === "string" ? parseInt(val) : val;
     if (Number.isNaN(num) || num < 0) {
       throw new Error("Invalid referendum ID");
@@ -3604,13 +3584,13 @@ import {
   composePromptFromState as composePromptFromState11,
   parseJSONObjectFromText as parseJSONObjectFromText11
 } from "@elizaos/core";
-import { z as z13 } from "zod";
-var transferFundsSchema = z13.object({
-  recipientAddress: z13.string(),
-  amount: z13.string(),
-  walletNumber: z13.number().optional().nullable(),
-  walletAddress: z13.string().optional().nullable(),
-  password: z13.string().optional().nullable()
+import { z as z12 } from "zod";
+var transferFundsSchema = z12.object({
+  recipientAddress: z12.string(),
+  amount: z12.string(),
+  walletNumber: z12.number().optional().nullable(),
+  walletAddress: z12.string().optional().nullable(),
+  password: z12.string().optional().nullable()
 });
 var transferFundsTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
   Example response:
@@ -3813,7 +3793,7 @@ import {
 import { AssetTransferApi, constructApiPromise } from "@substrate/asset-transfer-api";
 
 // src/utils/chainRegistryUtils.ts
-import { z as z14 } from "zod";
+import { z as z13 } from "zod";
 var CHAIN_RPC_MAPPING = {
   polkadot: "wss://rpc.polkadot.io",
   paseo: "wss://rpc.paseo.io",
@@ -3872,36 +3852,36 @@ var CHAIN_RPC_MAPPING = {
   sora: "wss://sora-rpc.dwellir.com",
   substrate: "wss://substrate-rpc.dwellir.com"
 };
-var AssetDetailsSchema = z14.object({
-  asset: z14.string(),
-  symbol: z14.string(),
-  decimals: z14.number()
+var AssetDetailsSchema = z13.object({
+  asset: z13.string(),
+  symbol: z13.string(),
+  decimals: z13.number()
 });
-var SpecRegistrySchema = z14.record(z14.string(), AssetDetailsSchema);
-var RegistryAssetInfoEntrySchema = z14.object({
-  tokens: z14.array(z14.string()),
-  assetsInfo: z14.record(z14.string(), z14.string()),
-  foreignAssetsInfo: z14.record(z14.string(), z14.union([z14.string(), z14.record(z14.unknown())])),
-  poolPairsInfo: z14.record(z14.string(), z14.union([z14.string(), z14.record(z14.unknown())])),
-  specName: z14.string(),
-  nativeChainID: z14.string().optional(),
-  registry: z14.record(z14.string(), SpecRegistrySchema).optional()
+var SpecRegistrySchema = z13.record(z13.string(), AssetDetailsSchema);
+var RegistryAssetInfoEntrySchema = z13.object({
+  tokens: z13.array(z13.string()),
+  assetsInfo: z13.record(z13.string(), z13.string()),
+  foreignAssetsInfo: z13.record(z13.string(), z13.union([z13.string(), z13.record(z13.unknown())])),
+  poolPairsInfo: z13.record(z13.string(), z13.union([z13.string(), z13.record(z13.unknown())])),
+  specName: z13.string(),
+  nativeChainID: z13.string().optional(),
+  registry: z13.record(z13.string(), SpecRegistrySchema).optional()
 });
-var RegistryChainEntriesSchema = z14.record(z14.string(), RegistryAssetInfoEntrySchema);
-var FullRegistryDataSchema = z14.record(z14.string(), RegistryChainEntriesSchema);
+var RegistryChainEntriesSchema = z13.record(z13.string(), RegistryAssetInfoEntrySchema);
+var FullRegistryDataSchema = z13.record(z13.string(), RegistryChainEntriesSchema);
 
 // src/actions/crossChainTransfer.ts
-import { z as z15 } from "zod";
-var crossChainTransferSchema = z15.object({
-  recipientAddress: z15.string(),
-  amount: z15.string(),
-  sourceChain: z15.string(),
-  destinationChain: z15.string(),
-  destinationParachainId: z15.string(),
-  assetId: z15.string(),
-  walletNumber: z15.number().optional().nullable(),
-  walletAddress: z15.string().optional().nullable(),
-  password: z15.string().optional().nullable()
+import { z as z14 } from "zod";
+var crossChainTransferSchema = z14.object({
+  recipientAddress: z14.string(),
+  amount: z14.string(),
+  sourceChain: z14.string(),
+  destinationChain: z14.string(),
+  destinationParachainId: z14.string(),
+  assetId: z14.string(),
+  walletNumber: z14.number().optional().nullable(),
+  walletAddress: z14.string().optional().nullable(),
+  password: z14.string().optional().nullable()
 });
 var crossChainTransferTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
     Example response:

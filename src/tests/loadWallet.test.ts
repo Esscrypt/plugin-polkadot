@@ -4,7 +4,6 @@ import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { PROVIDER_CONFIG } from '../providers/wallet';
-import { CONFIG_KEYS } from '../enviroment';
 import { CacheManager } from '../utils/cache';
 
 const cacheManager = new CacheManager();
@@ -19,9 +18,6 @@ describe('LoadWallet', () => {
     beforeEach(async () => {
         // Reset all mocks
         vi.clearAllMocks();
-
-        // Set environment variable to use mock cache manager
-        process.env[CONFIG_KEYS.USE_CACHE_MANAGER] = 'true';
 
         // Create a temporary test directory
         testBackupDir = path.join(process.cwd(), 'load_wallet_test_wallet_backups');
@@ -71,8 +67,6 @@ describe('LoadWallet', () => {
         if (fs.existsSync(testBackupDir)) {
             fs.rmSync(testBackupDir, { recursive: true, force: true });
         }
-        // Reset environment variable
-        delete process.env[CONFIG_KEYS.USE_CACHE_MANAGER];
     });
 
     describe('Load by Wallet Number', () => {

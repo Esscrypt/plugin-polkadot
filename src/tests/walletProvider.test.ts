@@ -15,7 +15,6 @@ import {
 import { mnemonicGenerate } from '@polkadot/util-crypto';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { CONFIG_KEYS } from '../enviroment';
 
 const cacheManager = new CacheManager();
 
@@ -46,7 +45,7 @@ describe('WalletProvider', () => {
         testMnemonic = mnemonicGenerate(12);
         mockGetSetting.mockImplementation((key: string) => {
             if (key === 'COINMARKETCAP_API_KEY') return 'test_cmc_key';
-            if (key === CONFIG_KEYS.POLKADOT_PRIVATE_KEY) return testMnemonic;
+            if (key === 'POLKADOT_PRIVATE_KEY') return testMnemonic;
             return null;
         });
     });

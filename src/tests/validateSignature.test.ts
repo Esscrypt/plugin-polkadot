@@ -7,7 +7,6 @@ import * as fs from 'node:fs';
 import { PROVIDER_CONFIG, WALLET_CACHE_KEY } from '../providers/wallet';
 import { ValidateAction } from '../actions/validateSignature';
 import { CacheManager } from '../utils/cache';
-import { CONFIG_KEYS } from '../enviroment';
 
 const cacheManager = new CacheManager();
 
@@ -23,9 +22,6 @@ describe('ValidateAction', () => {
     beforeEach(async () => {
         // Reset all mocks
         vi.clearAllMocks();
-
-        // Set environment variable to use cache manager
-        process.env[CONFIG_KEYS.USE_CACHE_MANAGER] = 'true';
 
         // Create a temporary test directory
         testBackupDir = path.join(process.cwd(), 'validate_signature_test_wallet_backups');
@@ -74,9 +70,6 @@ describe('ValidateAction', () => {
     });
 
     afterEach(async () => {
-        // Reset environment variable
-        delete process.env[CONFIG_KEYS.USE_CACHE_MANAGER];
-
         // Clear all wallets from cache
         await WalletProvider.clearAllWalletsFromCache(walletProvider);
 

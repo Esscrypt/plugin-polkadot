@@ -19,10 +19,7 @@ export default defineConfig({
         "path",
         "@reflink/reflink",
         "@node-llama-cpp",
-        "https",
-        "http",
         "agentkeepalive",
-        "@pinata/sdk",
         "bignumber.js",
         "zod",
         "node-cache"

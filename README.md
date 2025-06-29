@@ -33,17 +33,12 @@ This plugin provides functionality to:
 export POLKADOT_RPC_URL="wss://rpc.polkadot.io"
 export COINMARKETCAP_API_KEY="your_coinmarketcap_api_key"
 # Optional: POLKADOT_PRIVATE_KEY="your_mnemonic_phrase_for_default_wallet_initialization"
-
-# Run the debug script (if available)
-# bash ./packages/plugin-polkadot/scripts/debug.sh
 ```
 
 ## Installation
 
 ```bash
-npm install @elizaos/plugin-polkadot
-# or
-pnpm add @elizaos/plugin-polkadot
+bun add @elizaos/plugin-polkadot
 ```
 
 ## Configuration
@@ -144,19 +139,20 @@ import type { IAgentRuntime } from "@elizaos/core";
 ### Building
 
 ```bash
-pnpm run build
+bun run build
 ```
 
 ### Testing
 
 ```bash
-pnpm run test
+bun run test
 ```
 
 ## Dependencies
 
 - `@polkadot/keyring`: For managing Polkadot keypairs.
 - `@polkadot/util-crypto`: Cryptographic utilities including mnemonic generation and NaCl encryption.
+- `@
 - `@polkadot/util`: Utility functions for string/byte array conversions.
 - `@polkadot/api`: For connecting to Polkadot blockchain and querying on-chain data.
 - `bignumber.js`: Precise number handling.

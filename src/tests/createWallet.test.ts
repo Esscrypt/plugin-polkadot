@@ -4,7 +4,6 @@ import { CreateWalletAction } from '../actions/createWallet';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { PROVIDER_CONFIG } from '../providers/wallet';
-import { CONFIG_KEYS } from '../enviroment';
 import { CacheManager } from '../utils/cache';
 
 const cacheManager = new CacheManager();
@@ -17,9 +16,6 @@ describe('CreateWalletAction', () => {
     beforeEach(() => {
         // Reset all mocks
         vi.clearAllMocks();
-
-        // Set environment variable to use mock cache manager
-        process.env[CONFIG_KEYS.USE_CACHE_MANAGER] = 'true';
 
         // Create a temporary test directory
         testBackupDir = path.join(process.cwd(), 'create_wallet_test_wallet_backups');
@@ -58,8 +54,6 @@ describe('CreateWalletAction', () => {
         if (fs.existsSync(testBackupDir)) {
             fs.rmSync(testBackupDir, { recursive: true, force: true });
         }
-        // Reset environment variable
-        delete process.env[CONFIG_KEYS.USE_CACHE_MANAGER];
     });
 
     describe('initialize', () => {

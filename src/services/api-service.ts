@@ -1,6 +1,5 @@
 import { elizaLogger } from '@elizaos/core';
 import { ApiPromise, WsProvider } from '@polkadot/api';
-import { CONFIG_KEYS } from '../enviroment';
 import { Service, IAgentRuntime } from '@elizaos/core';
 
 const DEFAULT_NETWORK_CONFIG = {
@@ -50,8 +49,7 @@ export class PolkadotApiService extends Service {
     }
 
     async initialize(): Promise<void> {
-        const customEndpoint =
-            this.runtime.getSetting(CONFIG_KEYS.POLKADOT_RPC_URL) || process.env.POLKADOT_RPC_URL;
+        const customEndpoint = this.runtime.getSetting('POLKADOT_RPC_URL');
 
         if (customEndpoint) {
             this.networkConfig.DEFAULT_ENDPOINT = customEndpoint;
