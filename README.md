@@ -38,7 +38,6 @@ export COINMARKETCAP_API_KEY="your_coinmarketcap_api_key"
 # bash ./packages/plugin-polkadot/scripts/debug.sh
 ```
 
-<<<<<<< HEAD
 ## Getting Started
 
 ### New to ElizaOS
@@ -59,9 +58,6 @@ To test this plugin with ElizaOS from scratch, follow these steps:
 9. Go to [http://localhost:5173/](http://localhost:5173/) and interact with the agent.
 
 ### Existing ElizaOS Users
-=======
-## Installation
->>>>>>> 7d41f01 (Initial commit from ElizaOS CLI)
 
 ```bash
 npm install @elizaos/plugin-polkadot
@@ -317,8 +313,4 @@ For more information about Polkadot:
 
 ## License
 
-<<<<<<< HEAD
 This plugin is part of the Eliza project. See the main project repository for license information.
-=======
-This plugin is part of the Eliza project. See the main project repository for license information.
->>>>>>> 7d41f01 (Initial commit from ElizaOS CLI)
