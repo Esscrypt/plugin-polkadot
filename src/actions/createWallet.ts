@@ -1,6 +1,6 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
 import { composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
-import { elizaLogger, ModelType } from '@elizaos/core';
+import { logger, ModelType } from '@elizaos/core';
 import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import { z } from 'zod';
 
@@ -57,7 +57,7 @@ export async function buildCreateWalletDetails(
             prompt,
         });
         // try parsing to a json object
-        const parsedResponse = parseJSONObjectFromText(response) as CreateWalletContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as CreateWalletContent | null;
         // see if it contains objective and attachmentIds
         if (parsedResponse) {
             break;
@@ -69,7 +69,7 @@ export async function buildCreateWalletDetails(
     // If passwordData is undefined or encryptionPassword is not available, generate one.
     if (!parsedResponse?.encryptionPassword) {
         const generatedPassword = Math.random().toString(36).slice(-12); // Generate a 12-character random password
-        elizaLogger.log('Encryption password not provided by user, generating one.');
+        logger.log('Encryption password not provided by user, generating one.');
         // Ensure passwordData is an object before spreading. If it was undefined, initialize it.
         // If passwordData was undefined, initialize with a default text. Otherwise, use existing passwordData.
         const baseData = parsedResponse || { text: '' }; // Provide default text if passwordData is null/undefined
@@ -135,16 +135,16 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting CREATE_POLKADOT_WALLET action...');
+        logger.log('Starting CREATE_POLKADOT_WALLET action...');
 
         // Build password details using the object building approach
         const { content: createWalletContent, wasPasswordGenerated: isPasswordGenerated } =
             await buildCreateWalletDetails(runtime, message, state);
 
-        elizaLogger.debug('createWalletContent', createWalletContent);
+        logger.debug('createWalletContent', createWalletContent);
 
         if (!createWalletContent || typeof createWalletContent.encryptionPassword !== 'string') {
-            elizaLogger.error('Failed to obtain encryption password.');
+            logger.error('Failed to obtain encryption password.');
             if (callback) {
                 callback({
                     text: 'Unable to process create wallet request. Could not obtain an encryption password.',
@@ -214,7 +214,7 @@ This wallet number can be used to load and interact with your wallet in future s
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error creating wallet:', error);
+            logger.error('Error creating wallet:', error);
             if (callback) {
                 callback({
                     text: `Error creating wallet: ${error.message}`,

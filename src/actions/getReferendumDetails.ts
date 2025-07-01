@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { z } from 'zod';
 import { PolkadotApiService } from '../services/api-service';
 
@@ -144,14 +139,12 @@ export async function buildGetReferendumDetailsRequest(
         template: referendumDetailsTemplate,
     });
 
-    const parsedResponse: GetReferendumDetailsContent | null = null;
+    let parsedResponse: GetReferendumDetailsContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(
-            response,
-        ) as GetReferendumDetailsContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as GetReferendumDetailsContent | null;
         if (parsedResponse) {
             break;
         }
@@ -265,7 +258,7 @@ export class GetReferendumDetailsAction {
             }
 
             const info = typedReferendumInfo.unwrap().toJSON();
-            elizaLogger.info(info);
+            logger.info(info);
 
             // Extract track ID
             let trackId: number;
@@ -381,7 +374,7 @@ export class GetReferendumDetailsAction {
 
             return referendum;
         } catch (error) {
-            elizaLogger.error(`Error fetching referendum ${referendumId}:`, error);
+            logger.error(`Error fetching referendum ${referendumId}:`, error);
             throw new Error(`Failed to retrieve referendum ${referendumId}: ${error.message}`);
         }
     }
@@ -406,12 +399,12 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting GET_REFERENDUM_DETAILS action...');
+        logger.log('Starting GET_REFERENDUM_DETAILS action...');
 
         try {
             const detailsContent = await buildGetReferendumDetailsRequest(runtime, message, state);
 
-            elizaLogger.debug('detailsContent', detailsContent);
+            logger.debug('detailsContent', detailsContent);
 
             const action = new GetReferendumDetailsAction(runtime);
             const referendum = await action.getReferendumDetails(detailsContent.referendumId);
@@ -534,7 +527,7 @@ Queue Status: ${referendum.inQueue ? 'In queue' : 'Not in queue'}`;
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error retrieving referendum details:', error);
+            logger.error('Error retrieving referendum details:', error);
             if (callback) {
                 callback({
                     text: `Error retrieving referendum details: ${error.message}`,

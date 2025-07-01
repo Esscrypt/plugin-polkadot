@@ -20,7 +20,7 @@ vi.mock('@elizaos/core', async () => {
     const actual = await vi.importActual('@elizaos/core');
     return {
         ...actual,
-        elizaLogger: {
+        logger: {
             log: vi.fn(),
             debug: vi.fn(),
             warn: vi.fn(),

@@ -13,6 +13,7 @@ import { WalletProvider, nativeWalletProvider } from './providers/wallet.ts';
 import networkDataProvider from './providers/networkData.ts';
 import transferFundsAction from './actions/transferFunds.ts';
 import crossChainTransferAction from './actions/crossChainTransfer.ts';
+import { logger } from '@elizaos/core/v2';
 
 export {
     WalletProvider,
@@ -33,6 +34,21 @@ export {
 export const polkadotPlugin: Plugin = {
     name: 'polkadot',
     description: 'Polkadot Plugin for Eliza',
+    init: async (_config, runtime) => {
+        logger.log('Polkadot Plugin initialized');
+        const rpcUrl = runtime.getSetting('POLKADOT_RPC_URL');
+        if (!rpcUrl) {
+            logger.warn('POLKADOT_RPC_URL not provided');
+        }
+        const privateKey = runtime.getSetting('POLKADOT_PRIVATE_KEY');
+        if (!privateKey) {
+            logger.warn('POLKADOT_PRIVATE_KEY not provided');
+        }
+        const coinmarketcapApiKey = runtime.getSetting('COINMARKETCAP_API_KEY');
+        if (!coinmarketcapApiKey) {
+            logger.warn('COINMARKETCAP_API_KEY not provided');
+        }
+    },
     actions: [
         createWalletAction,
         ejectWalletAction,

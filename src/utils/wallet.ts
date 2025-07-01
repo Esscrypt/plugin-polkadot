@@ -1,5 +1,5 @@
 import type { IAgentRuntime } from '@elizaos/core';
-import { elizaLogger } from '@elizaos/core';
+import { logger } from '@elizaos/core';
 import BigNumber from 'bignumber.js';
 import { PROVIDER_CONFIG } from '../providers/wallet';
 
@@ -37,10 +37,10 @@ export async function fetchPrices(
         const cachedValue = await runtime.getCache<{ nativeToken: { usd: BigNumber } }>(cacheKey);
 
         if (cachedValue) {
-            elizaLogger.log('Cache hit for fetchPrices');
+            logger.log('Cache hit for fetchPrices');
             return cachedValue;
         }
-        elizaLogger.log('Cache miss for fetchPrices');
+        logger.log('Cache miss for fetchPrices');
 
         let lastError: Error | undefined;
         for (let i = 0; i < PROVIDER_CONFIG.MAX_RETRIES; i++) {
@@ -74,7 +74,7 @@ export async function fetchPrices(
                 throw new Error('Price data not found in CoinMarketCap response structure.');
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                elizaLogger.error(`Attempt ${i + 1} failed:`, message);
+                logger.error(`Attempt ${i + 1} failed:`, message);
                 lastError = error instanceof Error ? error : new Error(message);
                 if (i < PROVIDER_CONFIG.MAX_RETRIES - 1) {
                     const delay = PROVIDER_CONFIG.RETRY_DELAY * 2 ** i;
@@ -83,13 +83,13 @@ export async function fetchPrices(
             }
         }
 
-        elizaLogger.error('All attempts failed. Throwing the last error:', lastError);
+        logger.error('All attempts failed. Throwing the last error:', lastError);
         throw (
             lastError ?? new Error('All attempts to fetch prices failed without a specific error.')
         );
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        elizaLogger.error('Error fetching prices:', message);
+        logger.error('Error fetching prices:', message);
         throw new Error(`Failed to fetch prices: ${message}`);
     }
 }
@@ -120,10 +120,10 @@ export async function fetchPortfolioValue(
         const cachedValue = await runtime.getCache<WalletPortfolio>(cacheKey);
 
         if (cachedValue) {
-            elizaLogger.log('Cache hit for fetchPortfolioValue', cachedValue);
+            logger.log('Cache hit for fetchPortfolioValue', cachedValue);
             return cachedValue;
         }
-        elizaLogger.log('Cache miss for fetchPortfolioValue');
+        logger.log('Cache miss for fetchPortfolioValue');
 
         const prices = await fetchPrices(runtime, coinMarketCapApiKey);
         const nativeTokenBalance = BigInt(0);
@@ -139,7 +139,7 @@ export async function fetchPortfolioValue(
         return portfolio;
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        elizaLogger.error('Error fetching portfolio:', message);
+        logger.error('Error fetching portfolio:', message);
         throw new Error(`Failed to fetch portfolio value: ${message}`);
     }
 }
@@ -154,7 +154,7 @@ export async function getFormattedPortfolio(
         return formatPortfolio(runtime, portfolio, walletAddress);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        elizaLogger.error('Error generating portfolio report:', message);
+        logger.error('Error generating portfolio report:', message);
         return 'Unable to fetch wallet information. Please try again later.';
     }
 }

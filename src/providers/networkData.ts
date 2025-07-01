@@ -1,5 +1,5 @@
 import type { IAgentRuntime, Memory, Provider, ProviderResult, State } from '@elizaos/core';
-import { elizaLogger } from '@elizaos/core';
+import { logger } from '@elizaos/core';
 import { PolkadotApiService } from '../services/api-service';
 
 interface ChainInfo {
@@ -111,7 +111,7 @@ class ChainDataService {
             } catch (innerError) {
                 const message =
                     innerError instanceof Error ? innerError.message : String(innerError);
-                elizaLogger.error(`Error fetching validator count: ${message}`);
+                logger.error(`Error fetching validator count: ${message}`);
             }
         }
 
@@ -132,7 +132,7 @@ class ChainDataService {
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            elizaLogger.error(`Error fetching parachain count: ${message}`);
+            logger.error(`Error fetching parachain count: ${message}`);
         }
 
         return count;
@@ -174,7 +174,7 @@ export const networkDataProvider: Provider = {
                 output += `\n- Connected Parachains: ${parachainCount}`;
             }
 
-            elizaLogger.info('Network Data Provider output generated', output);
+            logger.info('Network Data Provider output generated', output);
             return {
                 text: output,
                 data: {
@@ -183,7 +183,7 @@ export const networkDataProvider: Provider = {
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            elizaLogger.error(`Error in Network Data Provider: ${message}`);
+            logger.error(`Error in Network Data Provider: ${message}`);
 
             return {
                 text: 'Network Data Provider: Unable to retrieve current network status.',

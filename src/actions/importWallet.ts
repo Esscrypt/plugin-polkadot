@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { WalletProvider, initWalletProvider, PROVIDER_CONFIG } from '../providers/wallet';
 import { z } from 'zod';
 import type { KeyringOptions } from '@polkadot/keyring/types';
@@ -66,12 +61,12 @@ export async function buildImportWalletDetails(
         template: importWalletTemplate,
     });
 
-    const parsedResponse: ImportWalletContent | null = null;
+    let parsedResponse: ImportWalletContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(response) as ImportWalletContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as ImportWalletContent | null;
         if (parsedResponse) {
             break;
         }
@@ -84,14 +79,14 @@ export async function buildImportWalletDetails(
         // This case should ideally be handled by asking the user for a mnemonic
         // For now, we'll throw an error or return a specific state if no data is extracted.
         // This part might need refinement based on how you want to handle missing mnemonics.
-        elizaLogger.error('Could not extract import wallet details from the message.');
+        logger.error('Could not extract import wallet details from the message.');
         throw new Error(
             'Mnemonic is required to import a wallet. Please provide your mnemonic phrase.',
         );
     }
 
     if (!importData.mnemonic) {
-        elizaLogger.warn('Mnemonic was not extracted. This should be prompted by the template.');
+        logger.warn('Mnemonic was not extracted. This should be prompted by the template.');
         // Depending on strictness, you might throw an error here or let the handler ask the user.
         throw new Error('Mnemonic is required and was not found in your message.');
     }
@@ -99,7 +94,7 @@ export async function buildImportWalletDetails(
     // If encryptionPassword is not available, generate one.
     if (!importData.encryptionPassword) {
         const generatedPassword = Math.random().toString(36).slice(-12); // Generate a 12-character random password
-        elizaLogger.log('Encryption password not provided by user for import, generating one.');
+        logger.log('Encryption password not provided by user for import, generating one.');
         importData = { ...importData, encryptionPassword: generatedPassword };
         wasEncryptionPasswordGenerated = true;
     }
@@ -125,7 +120,7 @@ export class ImportWalletAction {
         walletNumber: number;
         encryptedBackup: string;
     }> {
-        elizaLogger.debug('Importing wallet with params:', params);
+        logger.debug('Importing wallet with params:', params);
 
         const keyringOptions: KeyringOptions = {
             type: params.keyringType || PROVIDER_CONFIG.DEFAULT_KEYRING_TYPE,
@@ -148,9 +143,7 @@ export class ImportWalletAction {
                 },
             );
 
-        elizaLogger.log(
-            `Imported wallet successfully. Address: ${address}, Number: ${walletNumber}`,
-        );
+        logger.log(`Imported wallet successfully. Address: ${address}, Number: ${walletNumber}`);
 
         return { walletAddress: address, walletNumber, encryptedBackup };
     }
@@ -169,17 +162,17 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting IMPORT_POLKADOT_WALLET action...');
+        logger.log('Starting IMPORT_POLKADOT_WALLET action...');
 
         try {
             const { content: importWalletContent, wasEncryptionPasswordGenerated } =
                 await buildImportWalletDetails(runtime, message, state);
 
-            elizaLogger.debug('importWalletContent', importWalletContent);
+            logger.debug('importWalletContent', importWalletContent);
 
             if (!importWalletContent.mnemonic) {
                 // This should ideally be caught by buildImportWalletDetails, but as a safeguard:
-                elizaLogger.error('Mnemonic is missing after buildImportWalletDetails.');
+                logger.error('Mnemonic is missing after buildImportWalletDetails.');
                 if (callback) {
                     callback({
                         text: 'Unable to process import wallet request. Mnemonic is required.',
@@ -191,7 +184,7 @@ export default {
 
             // Ensure encryptionPassword is a string (it's generated if not provided)
             if (typeof importWalletContent.encryptionPassword !== 'string') {
-                elizaLogger.error('Encryption password was not set or generated.');
+                logger.error('Encryption password was not set or generated.');
                 if (callback) {
                     callback({
                         text: 'Unable to process import wallet request. Could not determine encryption password.',
@@ -257,7 +250,7 @@ Wallet Address: ${walletAddress}`;
             return true;
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            elizaLogger.error('Error importing wallet:', errorMessage, error);
+            logger.error('Error importing wallet:', errorMessage, error);
             if (callback) {
                 callback({
                     text: `Error importing wallet: ${errorMessage}`,

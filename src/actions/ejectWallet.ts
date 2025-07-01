@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import { z } from 'zod';
 
@@ -63,12 +58,12 @@ export async function buildEjectWalletDetails(
         template: ejectWalletTemplate,
     });
 
-    const parsedResponse: EjectWalletContent | null = null;
+    let parsedResponse: EjectWalletContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(response) as EjectWalletContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as EjectWalletContent | null;
         if (parsedResponse) {
             break;
         }
@@ -96,7 +91,7 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting EJECT_POLKADOT_WALLET action...');
+        logger.log('Starting EJECT_POLKADOT_WALLET action...');
 
         const ejectWalletContent = await buildEjectWalletDetails(runtime, message, state);
 
@@ -113,7 +108,7 @@ export default {
         }
 
         try {
-            elizaLogger.debug('ejectWalletContent', ejectWalletContent);
+            logger.debug('ejectWalletContent', ejectWalletContent);
             const { password, walletAddress, walletNumber } = ejectWalletContent;
 
             // Initialize the wallet provider
@@ -142,7 +137,7 @@ export default {
                     mnemonic = walletData.decryptedKeyring.mnemonic;
                 } else if (password) {
                     // Fall back to file system if no decrypted data in cache
-                    elizaLogger.log(
+                    logger.log(
                         `No decrypted data in cache for wallet #${walletNumber}, falling back to file system`,
                     );
                     const result = await WalletProvider.ejectWalletFromFile(
@@ -191,7 +186,7 @@ Please store it securely.`,
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error ejecting wallet:', error);
+            logger.error('Error ejecting wallet:', error);
             if (callback) {
                 callback({
                     text: `Error ejecting wallet: ${error.message}`,

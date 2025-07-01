@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import { z } from 'zod';
 import { PolkadotApiService } from 'src/services/api-service';
@@ -67,12 +62,12 @@ export async function buildTransferFundsDetails(
     });
 
     // Generate an object using the defined schema
-    const parsedResponse: TransferFundsContent | null = null;
+    let parsedResponse: TransferFundsContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(response) as TransferFundsContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as TransferFundsContent | null;
         if (parsedResponse) {
             break;
         }
@@ -138,7 +133,7 @@ export class TransferFundsAction {
 
         const apiService = await PolkadotApiService.start(this.runtime);
         const api = await apiService.getConnection();
-        elizaLogger.debug('API connection established');
+        logger.debug('API connection established');
 
         const properties = await api.rpc.system.properties();
 
@@ -152,7 +147,7 @@ export class TransferFundsAction {
 
         if (params.dryRun) {
             // Simulate the transfer without actually sending it
-            elizaLogger.debug(
+            logger.debug(
                 `DRY RUN: Transfer of ${params.amount} DOT to ${params.recipientAddress} would be initiated.`,
             );
 
@@ -166,7 +161,7 @@ export class TransferFundsAction {
         // Sign and send the transaction
         const hash = await transfer.signAndSend(keypair);
 
-        elizaLogger.debug(
+        logger.debug(
             `Transfer of ${params.amount} DOT to ${
                 params.recipientAddress
             } initiated. Transaction hash: ${hash.toHex()}`,
@@ -200,19 +195,19 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting POLKADOT_TRANSFER action...');
+        logger.log('Starting POLKADOT_TRANSFER action...');
 
         // Build transfer details using the object building approach
         const transferFundsContent = await buildTransferFundsDetails(runtime, message, state);
 
-        elizaLogger.debug('transferFundsContent', transferFundsContent);
+        logger.debug('transferFundsContent', transferFundsContent);
 
         if (
             !transferFundsContent ||
             !transferFundsContent.recipientAddress ||
             !transferFundsContent.amount
         ) {
-            elizaLogger.error('Failed to obtain required transfer details.');
+            logger.error('Failed to obtain required transfer details.');
             if (callback) {
                 callback({
                     text: 'Unable to process transfer request. Could not obtain recipient address or amount.',
@@ -247,7 +242,7 @@ export default {
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error transferring funds:', error);
+            logger.error('Error transferring funds:', error);
             if (callback) {
                 callback({
                     text: `Error transferring funds: ${error.message}`,

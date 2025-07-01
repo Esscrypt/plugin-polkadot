@@ -1,9 +1,9 @@
 // src/actions/createWallet.ts
 import { composePromptFromState, parseJSONObjectFromText } from "@elizaos/core";
-import { elizaLogger as elizaLogger4, ModelType } from "@elizaos/core";
+import { logger as logger4, ModelType } from "@elizaos/core";
 
 // src/providers/wallet.ts
-import { elizaLogger as elizaLogger3 } from "@elizaos/core";
+import { logger as logger3 } from "@elizaos/core";
 import * as path from "node:path";
 import { Keyring } from "@polkadot/keyring";
 import { cryptoWaitReady, mnemonicGenerate } from "@polkadot/util-crypto";
@@ -11,17 +11,17 @@ import { z } from "zod";
 import fs from "node:fs";
 
 // src/utils/wallet.ts
-import { elizaLogger } from "@elizaos/core";
+import { logger } from "@elizaos/core";
 import BigNumber from "bignumber.js";
 async function fetchPrices(runtime, coinMarketCapApiKey) {
   try {
     const cacheKey = "prices";
     const cachedValue = await runtime.getCache(cacheKey);
     if (cachedValue) {
-      elizaLogger.log("Cache hit for fetchPrices");
+      logger.log("Cache hit for fetchPrices");
       return cachedValue;
     }
-    elizaLogger.log("Cache miss for fetchPrices");
+    logger.log("Cache miss for fetchPrices");
     let lastError;
     for (let i = 0; i < PROVIDER_CONFIG.MAX_RETRIES; i++) {
       try {
@@ -36,9 +36,7 @@ async function fetchPrices(runtime, coinMarketCapApiKey) {
         );
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(
-            `HTTP error! status: ${response.status}, message: ${errorText}`
-          );
+          throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
         }
         const data = await response.json();
         const price = data?.data?.[PROVIDER_CONFIG.NATIVE_TOKEN_SYMBOL]?.quote?.USD;
@@ -52,7 +50,7 @@ async function fetchPrices(runtime, coinMarketCapApiKey) {
         throw new Error("Price data not found in CoinMarketCap response structure.");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        elizaLogger.error(`Attempt ${i + 1} failed:`, message);
+        logger.error(`Attempt ${i + 1} failed:`, message);
         lastError = error instanceof Error ? error : new Error(message);
         if (i < PROVIDER_CONFIG.MAX_RETRIES - 1) {
           const delay = PROVIDER_CONFIG.RETRY_DELAY * 2 ** i;
@@ -60,11 +58,11 @@ async function fetchPrices(runtime, coinMarketCapApiKey) {
         }
       }
     }
-    elizaLogger.error("All attempts failed. Throwing the last error:", lastError);
+    logger.error("All attempts failed. Throwing the last error:", lastError);
     throw lastError ?? new Error("All attempts to fetch prices failed without a specific error.");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    elizaLogger.error("Error fetching prices:", message);
+    logger.error("Error fetching prices:", message);
     throw new Error(`Failed to fetch prices: ${message}`);
   }
 }
@@ -84,10 +82,10 @@ async function fetchPortfolioValue(runtime, coinMarketCapApiKey, walletAddress) 
     const cacheKey = `portfolio-${walletAddress}`;
     const cachedValue = await runtime.getCache(cacheKey);
     if (cachedValue) {
-      elizaLogger.log("Cache hit for fetchPortfolioValue", cachedValue);
+      logger.log("Cache hit for fetchPortfolioValue", cachedValue);
       return cachedValue;
     }
-    elizaLogger.log("Cache miss for fetchPortfolioValue");
+    logger.log("Cache miss for fetchPortfolioValue");
     const prices = await fetchPrices(runtime, coinMarketCapApiKey);
     const nativeTokenBalance = BigInt(0);
     const amount = Number(nativeTokenBalance) / Number(PROVIDER_CONFIG.NATIVE_TOKEN_DECIMALS);
@@ -100,7 +98,7 @@ async function fetchPortfolioValue(runtime, coinMarketCapApiKey, walletAddress) 
     return portfolio;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    elizaLogger.error("Error fetching portfolio:", message);
+    logger.error("Error fetching portfolio:", message);
     throw new Error(`Failed to fetch portfolio value: ${message}`);
   }
 }
@@ -110,7 +108,7 @@ async function getFormattedPortfolio(runtime, coinMarketCapApiKey, walletAddress
     return formatPortfolio(runtime, portfolio, walletAddress);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    elizaLogger.error("Error generating portfolio report:", message);
+    logger.error("Error generating portfolio report:", message);
     return "Unable to fetch wallet information. Please try again later.";
   }
 }
@@ -118,7 +116,7 @@ async function getFormattedPortfolio(runtime, coinMarketCapApiKey, walletAddress
 // src/utils/encryption.ts
 import { naclDecrypt, naclEncrypt, randomAsU8a, pbkdf2Encode } from "@polkadot/util-crypto";
 import { stringToU8a, u8aToString, u8aToHex, hexToU8a } from "@polkadot/util";
-import { elizaLogger as elizaLogger2 } from "@elizaos/core";
+import { logger as logger2 } from "@elizaos/core";
 function encrypt(text, password) {
   try {
     if (!text || typeof text !== "string") {
@@ -136,7 +134,7 @@ function encrypt(text, password) {
     const encryptedHex = u8aToHex(encrypted);
     return `${kdfSaltHex}:${nonceHex}:${encryptedHex}`;
   } catch (error) {
-    elizaLogger2.error("Encryption error:", error);
+    logger2.error("Encryption error:", error);
     throw new Error(`Failed to encrypt data: ${error.message}`);
   }
 }
@@ -150,9 +148,7 @@ function decrypt(encryptedString, password) {
     }
     const parts = encryptedString.split(":");
     if (parts.length !== 3) {
-      throw new Error(
-        "Invalid encrypted data format (expected kdfSaltHex:nonceHex:encryptedHex)"
-      );
+      throw new Error("Invalid encrypted data format (expected kdfSaltHex:nonceHex:encryptedHex)");
     }
     const [kdfSaltHex, nonceHex, encryptedHex] = parts;
     const kdfSalt = hexToU8a(kdfSaltHex);
@@ -166,7 +162,7 @@ function decrypt(encryptedString, password) {
     const decryptedText = u8aToString(decryptedU8a);
     return decryptedText;
   } catch (error) {
-    elizaLogger2.error("Decryption error:", error.message);
+    logger2.error("Decryption error:", error.message);
     throw new Error(`Failed to decrypt data: ${error.message}`);
   }
 }
@@ -210,7 +206,7 @@ var WalletProvider = class _WalletProvider {
     this.runtime = params.runtime;
     this.coinMarketCapApiKey = process.env.COINMARKETCAP_API_KEY || "";
     if (!this.coinMarketCapApiKey) {
-      elizaLogger3.warn("COINMARKETCAP_API_KEY is not set. Price fetching will likely fail.");
+      logger3.warn("COINMARKETCAP_API_KEY is not set. Price fetching will likely fail.");
     }
     const { source } = params;
     this.source = source;
@@ -222,7 +218,7 @@ var WalletProvider = class _WalletProvider {
       dispatchMap[source.type]();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      elizaLogger3.error(`WalletProvider constructor failed: ${message}`);
+      logger3.error(`WalletProvider constructor failed: ${message}`);
       throw new Error(`Failed to initialize WalletProvider: ${message}`);
     }
     if (!this.keyring || this.keyring.getPairs().length === 0) {
@@ -232,22 +228,22 @@ var WalletProvider = class _WalletProvider {
     }
   }
   static async storeWalletInCache(address, wallet, walletNumber) {
-    elizaLogger3.debug("Starting storeWalletInCache for address:", address);
+    logger3.debug("Starting storeWalletInCache for address:", address);
     let cache;
     try {
       const cachedData = await wallet.runtime.getCache(WALLET_CACHE_KEY);
       if (cachedData) {
-        elizaLogger3.debug("Retrieved existing cache");
+        logger3.debug("Retrieved existing cache");
         cache = cachedData;
       } else {
-        elizaLogger3.debug("No existing cache found, creating new one");
+        logger3.debug("No existing cache found, creating new one");
         cache = {
           wallets: {},
           numberToAddress: {}
         };
       }
     } catch (error) {
-      elizaLogger3.error("Error retrieving cache, creating new one:", {
+      logger3.error("Error retrieving cache, creating new one:", {
         error: error instanceof Error ? {
           message: error.message,
           stack: error.stack,
@@ -260,7 +256,7 @@ var WalletProvider = class _WalletProvider {
       };
     }
     const finalWalletNumber = walletNumber ?? await _WalletProvider.getWalletNumberFromCache(address, cache);
-    elizaLogger3.debug("Assigned wallet number:", finalWalletNumber);
+    logger3.debug("Assigned wallet number:", finalWalletNumber);
     const walletData = {
       number: finalWalletNumber,
       createdAt: Date.now(),
@@ -282,9 +278,9 @@ var WalletProvider = class _WalletProvider {
     cache.numberToAddress[finalWalletNumber] = address;
     try {
       await wallet.runtime.setCache(WALLET_CACHE_KEY, cache);
-      elizaLogger3.debug("Successfully stored wallet in cache");
+      logger3.debug("Successfully stored wallet in cache");
     } catch (error) {
-      elizaLogger3.error("Failed to store wallet in cache:", {
+      logger3.error("Failed to store wallet in cache:", {
         error: error instanceof Error ? {
           message: error.message,
           stack: error.stack,
@@ -311,10 +307,7 @@ var WalletProvider = class _WalletProvider {
       }
       return files.length;
     } catch (_error) {
-      elizaLogger3.warn(
-        "Error reading backup directory for wallet numbering, defaulting to 1:",
-        _error
-      );
+      logger3.warn("Error reading backup directory for wallet numbering, defaulting to 1:", _error);
       return 1;
     }
   }
@@ -359,9 +352,7 @@ var WalletProvider = class _WalletProvider {
         });
       }
       if (walletData.encryptedData && !password) {
-        throw new Error(
-          `Wallet found in cache but no password provided for address ${address}`
-        );
+        throw new Error(`Wallet found in cache but no password provided for address ${address}`);
       }
     }
     const backupDir = path.join(process.cwd(), PROVIDER_CONFIG.WALLET_BACKUP_DIRNAME);
@@ -458,23 +449,18 @@ var WalletProvider = class _WalletProvider {
     if (softDerivation) {
       suri = `${suri}/${softDerivation}`;
     }
-    elizaLogger3.debug(
-      "Generated SURI for keyring init:",
-      suri,
-      "with options:",
-      keyringOptions
-    );
+    logger3.debug("Generated SURI for keyring init:", suri, "with options:", keyringOptions);
     this.keyring.addFromUri(suri, { name: pairName }, keyringOptions.type);
   }
   // Private handler methods for initialization logic
   _initializeFromMnemonic(source) {
     try {
-      elizaLogger3.debug("Initializing wallet from mnemonic");
+      logger3.debug("Initializing wallet from mnemonic");
       const opts = source.keyringOptions || {
         type: PROVIDER_CONFIG.DEFAULT_KEYRING_TYPE,
         ss58Format: PROVIDER_CONFIG.DEFAULT_KEYRING_SS58_FORMAT
       };
-      elizaLogger3.debug("Using keyring options:", opts);
+      logger3.debug("Using keyring options:", opts);
       this._initKeyringFromDetails(
         source.mnemonic,
         opts,
@@ -485,9 +471,9 @@ var WalletProvider = class _WalletProvider {
         "main pair"
         // Specific name for this initialization path
       );
-      elizaLogger3.debug("Wallet initialized successfully from mnemonic");
+      logger3.debug("Wallet initialized successfully from mnemonic");
     } catch (error) {
-      elizaLogger3.error("Error initializing from mnemonic:", {
+      logger3.error("Error initializing from mnemonic:", {
         error: error instanceof Error ? {
           message: error.message,
           stack: error.stack,
@@ -499,22 +485,18 @@ var WalletProvider = class _WalletProvider {
   }
   _initializeFromEncryptedJson(source) {
     try {
-      elizaLogger3.debug("Initializing wallet from encrypted JSON");
-      elizaLogger3.debug("Encrypted data length:", source.encryptedJson.length);
+      logger3.debug("Initializing wallet from encrypted JSON");
+      logger3.debug("Encrypted data length:", source.encryptedJson.length);
       const decryptedJson = decrypt(source.encryptedJson, source.password);
-      elizaLogger3.debug("Decrypted JSON length:", decryptedJson.length);
+      logger3.debug("Decrypted JSON length:", decryptedJson.length);
       let walletData;
       try {
-        elizaLogger3.debug(
-          "Attempting to parse and validate decrypted JSON for wallet data"
-        );
+        logger3.debug("Attempting to parse and validate decrypted JSON for wallet data");
         const parsedJson = JSON.parse(decryptedJson);
-        walletData = decryptedWalletBackupDataSchema.parse(
-          parsedJson
-        );
-        elizaLogger3.debug("Successfully parsed and validated wallet data structure");
+        walletData = decryptedWalletBackupDataSchema.parse(parsedJson);
+        logger3.debug("Successfully parsed and validated wallet data structure");
       } catch (parseError) {
-        elizaLogger3.error("JSON Parse or Validation Error:", {
+        logger3.error("JSON Parse or Validation Error:", {
           error: parseError instanceof Error ? {
             message: parseError.message,
             stack: parseError.stack,
@@ -525,22 +507,18 @@ var WalletProvider = class _WalletProvider {
         throw new Error(`Failed to parse decrypted wallet data: ${parseError.message}`);
       }
       if (!walletData.mnemonic || !walletData.options) {
-        elizaLogger3.error(
-          "Missing required fields (mnemonic or options) in parsed wallet data."
-        );
+        logger3.error("Missing required fields (mnemonic or options) in parsed wallet data.");
         throw new Error("Decrypted data missing required fields (mnemonic or options)");
       }
       const keyringInitOptions = walletData.options;
       if (!keyringInitOptions.type) {
-        elizaLogger3.warn(
+        logger3.warn(
           "Keyring type missing in decrypted options, defaulting to ed25519 as per PROVIDER_CONFIG"
         );
         keyringInitOptions.type = PROVIDER_CONFIG.DEFAULT_KEYRING_TYPE;
       }
       if (keyringInitOptions.ss58Format === void 0 || keyringInitOptions.ss58Format === null) {
-        elizaLogger3.warn(
-          "ss58Format missing in decrypted options, defaulting as per PROVIDER_CONFIG"
-        );
+        logger3.warn("ss58Format missing in decrypted options, defaulting as per PROVIDER_CONFIG");
         keyringInitOptions.ss58Format = PROVIDER_CONFIG.DEFAULT_KEYRING_SS58_FORMAT;
       }
       this._initKeyringFromDetails(
@@ -554,9 +532,9 @@ var WalletProvider = class _WalletProvider {
         "imported main pair"
         // Specific name for this initialization path
       );
-      elizaLogger3.debug("Wallet initialized successfully from encrypted JSON");
+      logger3.debug("Wallet initialized successfully from encrypted JSON");
     } catch (error) {
-      elizaLogger3.error("Error initializing from encrypted JSON:", {
+      logger3.error("Error initializing from encrypted JSON:", {
         error: error instanceof Error ? {
           message: error.message,
           stack: error.stack,
@@ -668,7 +646,7 @@ var WalletProvider = class _WalletProvider {
       fs.writeFileSync(filePath, encryptedMnemonicAndOptions, {
         encoding: "utf-8"
       });
-      elizaLogger3.log(`Wallet backup saved to ${filePath}`);
+      logger3.log(`Wallet backup saved to ${filePath}`);
       const walletNumber = _WalletProvider.getNextWalletNumberFromFilesystem();
       await _WalletProvider.storeWalletInCache(address, newWalletProvider, walletNumber);
       newWalletProvider.walletNumber = walletNumber;
@@ -679,7 +657,7 @@ var WalletProvider = class _WalletProvider {
         walletNumber
       };
     } catch (error) {
-      elizaLogger3.error("Error in wallet generation:", {
+      logger3.error("Error in wallet generation:", {
         error: error instanceof Error ? {
           message: error.message,
           stack: error.stack,
@@ -719,22 +697,20 @@ var WalletProvider = class _WalletProvider {
     const encryptedFileContent = fs.readFileSync(filePath, {
       encoding: "utf-8"
     });
-    elizaLogger3.debug("Read encrypted file content, length:", encryptedFileContent.length);
+    logger3.debug("Read encrypted file content, length:", encryptedFileContent.length);
     const decryptedFileJson = decrypt(encryptedFileContent, password);
-    elizaLogger3.debug("Decrypted file content length:", decryptedFileJson.length);
+    logger3.debug("Decrypted file content length:", decryptedFileJson.length);
     try {
       const parsedJson = JSON.parse(decryptedFileJson);
       const walletData = decryptedWalletBackupDataSchema.parse(
         parsedJson
       );
-      elizaLogger3.debug("Successfully parsed and validated wallet data from ejected file");
-      elizaLogger3.log(
-        `Wallet ejected from file ${filePath}, revealing mnemonic and options.`
-      );
+      logger3.debug("Successfully parsed and validated wallet data from ejected file");
+      logger3.log(`Wallet ejected from file ${filePath}, revealing mnemonic and options.`);
       await _WalletProvider.clearWalletFromCache(wallet, walletAddressForBackupName);
       return walletData;
     } catch (parseError) {
-      elizaLogger3.error("JSON Parse or Validation Error in ejectWalletFromFile:", {
+      logger3.error("JSON Parse or Validation Error in ejectWalletFromFile:", {
         error: parseError instanceof Error ? {
           message: parseError.message,
           stack: parseError.stack,
@@ -755,7 +731,7 @@ var WalletProvider = class _WalletProvider {
       }
     };
     const walletProvider = new _WalletProvider(constructionParams);
-    elizaLogger3.log(
+    logger3.log(
       `Wallet imported successfully via encrypted JSON, address: ${walletProvider.getAddress()}`
     );
     return walletProvider;
@@ -800,7 +776,7 @@ var WalletProvider = class _WalletProvider {
     const fileName = `${address}_wallet_backup.json`;
     const filePath = path.join(backupDir, fileName);
     fs.writeFileSync(filePath, encryptedBackup, { encoding: "utf-8" });
-    elizaLogger3.log(`Wallet backup for imported mnemonic saved to ${filePath}`);
+    logger3.log(`Wallet backup for imported mnemonic saved to ${filePath}`);
     const walletNumber = _WalletProvider.getNextWalletNumberFromFilesystem();
     await _WalletProvider.storeWalletInCache(address, newWalletProvider, walletNumber);
     newWalletProvider.walletNumber = walletNumber;
@@ -815,7 +791,7 @@ var WalletProvider = class _WalletProvider {
 var initWalletProvider = async (runtime) => {
   let mnemonic = runtime.getSetting("POLKADOT_PRIVATE_KEY");
   if (!mnemonic) {
-    elizaLogger3.error("POLKADOT_PRIVATE_KEY is missing");
+    logger3.error("POLKADOT_PRIVATE_KEY is missing");
     mnemonic = mnemonicGenerate(24);
   }
   const mnemonicsArray = mnemonic.split(" ");
@@ -837,7 +813,7 @@ var initWalletProvider = async (runtime) => {
       keyringOptions
     }
   });
-  elizaLogger3.log(`Wallet initialized from settings, address: ${walletProvider.getAddress()}`);
+  logger3.log(`Wallet initialized from settings, address: ${walletProvider.getAddress()}`);
   return walletProvider;
 };
 var nativeWalletProvider = {
@@ -851,11 +827,11 @@ var nativeWalletProvider = {
           walletProvider.coinMarketCapApiKey,
           walletProvider.getAddress()
         );
-        elizaLogger3.log(formattedPortfolio);
+        logger3.log(formattedPortfolio);
         return { text: formattedPortfolio };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        elizaLogger3.error(
+        logger3.error(
           `Error in ${PROVIDER_CONFIG.NATIVE_TOKEN_SYMBOL.toUpperCase()} wallet provider:`,
           message
         );
@@ -900,15 +876,15 @@ async function buildCreateWalletDetails(runtime, _message, state) {
     const response = await runtime.useModel(ModelType.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText(response);
-    if (parsedResponse2) {
+    parsedResponse = parseJSONObjectFromText(response);
+    if (parsedResponse) {
       break;
     }
   }
   let wasPasswordGenerated = false;
   if (!parsedResponse?.encryptionPassword) {
     const generatedPassword = Math.random().toString(36).slice(-12);
-    elizaLogger4.log("Encryption password not provided by user, generating one.");
+    logger4.log("Encryption password not provided by user, generating one.");
     const baseData = parsedResponse || { text: "" };
     parsedResponse = { ...baseData, encryptionPassword: generatedPassword };
     wasPasswordGenerated = true;
@@ -945,11 +921,11 @@ var createWallet_default = {
   similes: ["NEW_POLKADOT_WALLET", "MAKE_NEW_POLKADOT_WALLET"],
   description: "Creates a new Polkadot wallet on demand. Returns the public address and mnemonic backup (store it securely). The wallet keypair is also encrypted to a file using the provided password. Optionally supports keypair password and derivation paths.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger4.log("Starting CREATE_POLKADOT_WALLET action...");
+    logger4.log("Starting CREATE_POLKADOT_WALLET action...");
     const { content: createWalletContent, wasPasswordGenerated: isPasswordGenerated } = await buildCreateWalletDetails(runtime, message, state);
-    elizaLogger4.debug("createWalletContent", createWalletContent);
+    logger4.debug("createWalletContent", createWalletContent);
     if (!createWalletContent || typeof createWalletContent.encryptionPassword !== "string") {
-      elizaLogger4.error("Failed to obtain encryption password.");
+      logger4.error("Failed to obtain encryption password.");
       if (callback) {
         callback({
           text: "Unable to process create wallet request. Could not obtain an encryption password.",
@@ -1017,7 +993,7 @@ ${mnemonic}`;
       }
       return true;
     } catch (error) {
-      elizaLogger4.error("Error creating wallet:", error);
+      logger4.error("Error creating wallet:", error);
       if (callback) {
         callback({
           text: `Error creating wallet: ${error.message}`,
@@ -1063,12 +1039,7 @@ ${mnemonic}`;
 };
 
 // src/actions/ejectWallet.ts
-import {
-  elizaLogger as elizaLogger5,
-  ModelType as ModelType2,
-  composePromptFromState as composePromptFromState2,
-  parseJSONObjectFromText as parseJSONObjectFromText2
-} from "@elizaos/core";
+import { logger as logger5, ModelType as ModelType2, composePromptFromState as composePromptFromState2, parseJSONObjectFromText as parseJSONObjectFromText2 } from "@elizaos/core";
 import { z as z3 } from "zod";
 function isEjectWalletContent(content) {
   return (typeof content.password === "string" || content.password === void 0 || content.password === null) && (typeof content.walletAddress === "string" || content.walletAddress === void 0 || content.walletAddress === null) && (typeof content.walletNumber === "number" || content.walletNumber === void 0 || content.walletNumber === null);
@@ -1096,13 +1067,13 @@ async function buildEjectWalletDetails(runtime, _message, state) {
     state,
     template: ejectWalletTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType2.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText2(response);
-    if (parsedResponse2) {
+    parsedResponse = parseJSONObjectFromText2(response);
+    if (parsedResponse) {
       break;
     }
   }
@@ -1117,7 +1088,7 @@ var ejectWallet_default = {
   similes: ["EXPORT_POLKADOT_WALLET", "RECOVER_WALLET", "EJECT_WALLET"],
   description: "Ejects an existing Polkadot wallet either by wallet number or from an encrypted backup file. Returns the wallet's mnemonic.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger5.log("Starting EJECT_POLKADOT_WALLET action...");
+    logger5.log("Starting EJECT_POLKADOT_WALLET action...");
     const ejectWalletContent = await buildEjectWalletDetails(runtime, message, state);
     if (!isEjectWalletContent(ejectWalletContent)) {
       if (callback) {
@@ -1131,7 +1102,7 @@ var ejectWallet_default = {
       return false;
     }
     try {
-      elizaLogger5.debug("ejectWalletContent", ejectWalletContent);
+      logger5.debug("ejectWalletContent", ejectWalletContent);
       const { password, walletAddress, walletNumber } = ejectWalletContent;
       const walletProvider = await initWalletProvider(runtime);
       let mnemonic;
@@ -1152,7 +1123,7 @@ var ejectWallet_default = {
         if (walletData?.decryptedKeyring?.mnemonic) {
           mnemonic = walletData.decryptedKeyring.mnemonic;
         } else if (password) {
-          elizaLogger5.log(
+          logger5.log(
             `No decrypted data in cache for wallet #${walletNumber}, falling back to file system`
           );
           const result2 = await WalletProvider.ejectWalletFromFile(
@@ -1204,7 +1175,7 @@ Please store it securely.`,
       }
       return true;
     } catch (error) {
-      elizaLogger5.error("Error ejecting wallet:", error);
+      logger5.error("Error ejecting wallet:", error);
       if (callback) {
         callback({
           text: `Error ejecting wallet: ${error.message}`,
@@ -1250,12 +1221,7 @@ Please store it securely.`,
 };
 
 // src/actions/signMessage.ts
-import {
-  elizaLogger as elizaLogger6,
-  ModelType as ModelType3,
-  composePromptFromState as composePromptFromState3,
-  parseJSONObjectFromText as parseJSONObjectFromText3
-} from "@elizaos/core";
+import { logger as logger6, ModelType as ModelType3, composePromptFromState as composePromptFromState3, parseJSONObjectFromText as parseJSONObjectFromText3 } from "@elizaos/core";
 import { stringToU8a as stringToU8a2, u8aToHex as u8aToHex2 } from "@polkadot/util";
 import { z as z4 } from "zod";
 function isSignMessageContent(content) {
@@ -1287,13 +1253,13 @@ async function buildSignMessageDetails(runtime, message, state) {
     state: currentState,
     template: signMessageTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType3.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText3(response);
-    if (parsedResponse2) {
+    parsedResponse = parseJSONObjectFromText3(response);
+    if (parsedResponse) {
       break;
     }
   }
@@ -1322,9 +1288,7 @@ var SignMessageAction = class {
         password
       );
       if (!targetWallet) {
-        throw new Error(
-          `Failed to load wallet #${walletNumber}. Please check the wallet number.`
-        );
+        throw new Error(`Failed to load wallet #${walletNumber}. Please check the wallet number.`);
       }
       currentWalletNumber = walletNumber;
     } else if (walletAddress) {
@@ -1363,7 +1327,7 @@ var signMessage_default = {
   similes: ["SIGN_MESSAGE", "SIGN_DATA", "SIGN_TRANSACTION"],
   description: "Signs a message using a Polkadot wallet. Returns the signature.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger6.log("Starting SIGN_POLKADOT_MESSAGE action...");
+    logger6.log("Starting SIGN_POLKADOT_MESSAGE action...");
     const signMessageContent = await buildSignMessageDetails(runtime, message, state);
     if (!isSignMessageContent(signMessageContent)) {
       if (callback) {
@@ -1377,7 +1341,7 @@ var signMessage_default = {
       return false;
     }
     try {
-      elizaLogger6.debug("signMessageContent", signMessageContent);
+      logger6.debug("signMessageContent", signMessageContent);
       const { messageToSign, walletNumber, walletAddress } = signMessageContent;
       const walletProvider = await initWalletProvider(runtime);
       const signAction = new SignMessageAction(walletProvider);
@@ -1397,7 +1361,7 @@ Signature: ${result.signature}`,
       return true;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      elizaLogger6.error("Error signing message:", errorMessage);
+      logger6.error("Error signing message:", errorMessage);
       if (callback) {
         callback({
           text: `Error signing message: ${errorMessage}`,
@@ -1443,12 +1407,7 @@ Signature: ${result.signature}`,
 };
 
 // src/actions/loadWallet.ts
-import {
-  elizaLogger as elizaLogger7,
-  ModelType as ModelType4,
-  composePromptFromState as composePromptFromState4,
-  parseJSONObjectFromText as parseJSONObjectFromText4
-} from "@elizaos/core";
+import { logger as logger7, ModelType as ModelType4, composePromptFromState as composePromptFromState4, parseJSONObjectFromText as parseJSONObjectFromText4 } from "@elizaos/core";
 import { z as z5 } from "zod";
 function isLoadWalletContent(content) {
   return (typeof content.walletNumber === "number" || content.walletNumber === void 0 || content.walletNumber === null) && (typeof content.walletAddress === "string" || content.walletAddress === void 0 || content.walletAddress === null) && (typeof content.walletPassword === "string" || content.walletPassword === void 0 || content.walletPassword === null);
@@ -1477,13 +1436,13 @@ async function buildLoadWalletDetails(runtime, message, state) {
     state: currentState,
     template: loadWalletTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType4.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText4(response);
-    if (parsedResponse2) {
+    parsedResponse = parseJSONObjectFromText4(response);
+    if (parsedResponse) {
       break;
     }
   }
@@ -1498,7 +1457,7 @@ var loadWallet_default = {
   similes: ["LOAD_WALLET", "OPEN_WALLET", "ACCESS_WALLET"],
   description: "Loads an existing Polkadot wallet either by wallet number or address. Returns the wallet's address.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger7.log("Starting LOAD_POLKADOT_WALLET action...");
+    logger7.log("Starting LOAD_POLKADOT_WALLET action...");
     const loadWalletContent = await buildLoadWalletDetails(runtime, message, state);
     if (!isLoadWalletContent(loadWalletContent)) {
       if (callback) {
@@ -1512,7 +1471,7 @@ var loadWallet_default = {
       return false;
     }
     try {
-      elizaLogger7.debug("loadWalletContent", loadWalletContent);
+      logger7.debug("loadWalletContent", loadWalletContent);
       const { walletNumber, walletAddress, walletPassword } = loadWalletContent;
       const walletProvider = await initWalletProvider(runtime);
       let targetWallet = null;
@@ -1558,7 +1517,7 @@ Your wallet address is: ${address}${currentWalletNumber ? ` (Wallet #${currentWa
       }
       return true;
     } catch (error) {
-      elizaLogger7.error("Error loading wallet:", error);
+      logger7.error("Error loading wallet:", error);
       if (callback) {
         callback({
           text: `Error loading wallet: ${error.message}`,
@@ -1604,12 +1563,7 @@ Your wallet address is: ${address}${currentWalletNumber ? ` (Wallet #${currentWa
 };
 
 // src/actions/validateSignature.ts
-import {
-  elizaLogger as elizaLogger8,
-  ModelType as ModelType5,
-  composePromptFromState as composePromptFromState5,
-  parseJSONObjectFromText as parseJSONObjectFromText5
-} from "@elizaos/core";
+import { logger as logger8, ModelType as ModelType5, composePromptFromState as composePromptFromState5, parseJSONObjectFromText as parseJSONObjectFromText5 } from "@elizaos/core";
 import { stringToU8a as stringToU8a3, hexToU8a as hexToU8a2 } from "@polkadot/util";
 import { z as z6 } from "zod";
 var validateSignatureSchema = z6.object({
@@ -1641,9 +1595,7 @@ var ValidateAction = class {
   }
   async validateSignature(messageToVerify, signature, walletNumber, walletAddress, password) {
     if (!walletNumber && !walletAddress) {
-      throw new Error(
-        "Unable to validate signature. Please provide a wallet number or address."
-      );
+      throw new Error("Unable to validate signature. Please provide a wallet number or address.");
     }
     if (!messageToVerify) {
       throw new Error("Cannot validate signature for an empty message");
@@ -1660,9 +1612,7 @@ var ValidateAction = class {
         password
       );
       if (!targetWallet) {
-        throw new Error(
-          `Failed to load wallet #${walletNumber}. Please check the wallet number.`
-        );
+        throw new Error(`Failed to load wallet #${walletNumber}. Please check the wallet number.`);
       }
       currentWalletNumber = walletNumber;
     } else if (walletAddress) {
@@ -1704,13 +1654,13 @@ async function buildValidateSignatureDetails(runtime, message, state) {
     state: currentState,
     template: validateSignatureTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType5.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText5(response);
-    if (parsedResponse2) {
+    parsedResponse = parseJSONObjectFromText5(response);
+    if (parsedResponse) {
       break;
     }
   }
@@ -1731,12 +1681,8 @@ var validateSignature_default = {
   similes: ["VERIFY_SIGNATURE", "CHECK_SIGNATURE", "VALIDATE_SIGNATURE"],
   description: "Validates a signature for a message using a Polkadot wallet. Returns whether the signature is valid.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger8.log("Starting VALIDATE_POLKADOT_SIGNATURE action...");
-    const validateSignatureContent = await buildValidateSignatureDetails(
-      runtime,
-      message,
-      state
-    );
+    logger8.log("Starting VALIDATE_POLKADOT_SIGNATURE action...");
+    const validateSignatureContent = await buildValidateSignatureDetails(runtime, message, state);
     if (!isValidateSignatureContent(validateSignatureContent)) {
       if (callback) {
         callback({
@@ -1749,7 +1695,7 @@ var validateSignature_default = {
       return false;
     }
     try {
-      elizaLogger8.debug("validateSignatureContent", validateSignatureContent);
+      logger8.debug("validateSignatureContent", validateSignatureContent);
       const {
         message: messageToVerify,
         signature,
@@ -1772,7 +1718,7 @@ var validateSignature_default = {
       }
       return true;
     } catch (error) {
-      elizaLogger8.error("Error validating signature:", error);
+      logger8.error("Error validating signature:", error);
       if (callback) {
         callback({
           text: `Error validating signature: ${error.message}`,
@@ -1818,17 +1764,12 @@ var validateSignature_default = {
 };
 
 // src/actions/getBalance.ts
-import {
-  elizaLogger as elizaLogger10,
-  ModelType as ModelType6,
-  composePromptFromState as composePromptFromState6,
-  parseJSONObjectFromText as parseJSONObjectFromText6
-} from "@elizaos/core";
+import { logger as logger10, ModelType as ModelType6, composePromptFromState as composePromptFromState6, parseJSONObjectFromText as parseJSONObjectFromText6 } from "@elizaos/core";
 import { z as z7 } from "zod";
 import { formatBalance } from "@polkadot/util";
 
 // src/services/api-service.ts
-import { elizaLogger as elizaLogger9 } from "@elizaos/core";
+import { logger as logger9 } from "@elizaos/core";
 import { ApiPromise, WsProvider } from "@polkadot/api";
 import { Service } from "@elizaos/core";
 var DEFAULT_NETWORK_CONFIG = {
@@ -1872,9 +1813,9 @@ var PolkadotApiService = class _PolkadotApiService extends Service {
     const customEndpoint = this.runtime.getSetting("POLKADOT_RPC_URL");
     if (customEndpoint) {
       this.networkConfig.DEFAULT_ENDPOINT = customEndpoint;
-      elizaLogger9.debug(`Using custom Polkadot endpoint: ${customEndpoint}`);
+      logger9.debug(`Using custom Polkadot endpoint: ${customEndpoint}`);
     } else {
-      elizaLogger9.debug(
+      logger9.debug(
         `No custom endpoint found, using default: ${this.networkConfig.DEFAULT_ENDPOINT}`
       );
     }
@@ -1909,17 +1850,17 @@ var PolkadotApiService = class _PolkadotApiService extends Service {
   async connectWithRetry(retryCount = 0) {
     try {
       const endpoint = this.getNextEndpoint();
-      elizaLogger9.debug(`Connecting to Polkadot at ${endpoint}`);
+      logger9.debug(`Connecting to Polkadot at ${endpoint}`);
       this.provider = new WsProvider(endpoint);
       this.api = await ApiPromise.create({ provider: this.provider });
-      elizaLogger9.debug(`Connected to Polkadot at ${endpoint}`);
+      logger9.debug(`Connected to Polkadot at ${endpoint}`);
       return this.api;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      elizaLogger9.error(`Polkadot connection error: ${message}`);
+      logger9.error(`Polkadot connection error: ${message}`);
       if (retryCount < this.networkConfig.MAX_RETRIES) {
         const delay = this.networkConfig.RETRY_DELAY * 2 ** retryCount;
-        elizaLogger9.debug(`Retrying connection in ${delay}ms...`);
+        logger9.debug(`Retrying connection in ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         return this.connectWithRetry(retryCount + 1);
       }
@@ -1938,7 +1879,7 @@ var PolkadotApiService = class _PolkadotApiService extends Service {
       ...this.networkConfig.BACKUP_ENDPOINTS
     ];
     this.lastEndpointIndex = this.lastEndpointIndex % allEndpoints.length;
-    elizaLogger9.debug(`Next endpoint: ${allEndpoints[this.lastEndpointIndex]}`);
+    logger9.debug(`Next endpoint: ${allEndpoints[this.lastEndpointIndex]}`);
     return allEndpoints[this.lastEndpointIndex];
   }
   /**
@@ -1993,7 +1934,7 @@ var PolkadotApiService = class _PolkadotApiService extends Service {
         writable: true
       });
       this.lastEndpointIndex = 0;
-      elizaLogger9.debug(`Updated Polkadot API endpoints: ${endpoints.join(", ")}`);
+      logger9.debug(`Updated Polkadot API endpoints: ${endpoints.join(", ")}`);
     }
   }
 };
@@ -2018,21 +1959,19 @@ async function buildGetBalanceDetails(runtime, _message, state) {
     state,
     template: addressTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType6.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText6(response);
-    if (parsedResponse2) {
+    logger10.info(response);
+    parsedResponse = parseJSONObjectFromText6(response);
+    if (parsedResponse) {
       break;
     }
   }
-  const validatedResponse = getBalanceSchema.safeParse(parsedResponse);
-  if (!validatedResponse.success) {
-    throw new Error("Failed to extract a valid Polkadot address from the message");
-  }
-  return validatedResponse.data;
+  logger10.info(parsedResponse);
+  return parsedResponse;
 }
 var GetBalanceAction = class {
   runtime;
@@ -2041,18 +1980,18 @@ var GetBalanceAction = class {
   }
   async getBalance(params) {
     try {
-      elizaLogger10.debug("Initializing getBalance for address:", params.address);
+      logger10.debug("Initializing getBalance for address:", params.address);
       const apiService = await PolkadotApiService.start(this.runtime);
       const api = await apiService.getConnection();
-      elizaLogger10.debug("API connection established");
+      logger10.debug("API connection established");
       const accountInfo = await api.query.system.account(params.address);
-      elizaLogger10.debug("Account info retrieved:", accountInfo.toHuman());
+      logger10.debug("Account info retrieved:", accountInfo.toHuman());
       const balance = accountInfo.toJSON();
       const properties = await api.rpc.system.properties();
-      elizaLogger10.debug("Chain properties retrieved:", properties.toHuman());
+      logger10.debug("Chain properties retrieved:", properties.toHuman());
       const tokenSymbol = properties.tokenSymbol.unwrap()[0].toString();
       const tokenDecimals = properties.tokenDecimals.unwrap()[0].toNumber();
-      elizaLogger10.debug("Token details:", { tokenSymbol, tokenDecimals });
+      logger10.debug("Token details:", { tokenSymbol, tokenDecimals });
       formatBalance.setDefaults({
         decimals: tokenDecimals,
         unit: tokenSymbol
@@ -2064,7 +2003,7 @@ var GetBalanceAction = class {
       const freeBalance = balance.data.free.toString();
       const reservedBalance = balance.data.reserved.toString();
       const totalBalance = (BigInt(balance.data.free) + BigInt(balance.data.reserved)).toString();
-      elizaLogger10.debug("Balance calculations completed:", {
+      logger10.debug("Balance calculations completed:", {
         freeBalance,
         reservedBalance,
         totalBalance
@@ -2081,7 +2020,7 @@ var GetBalanceAction = class {
         BigInt(balance.data.free) + BigInt(balance.data.reserved),
         formatOptions
       )} ${tokenSymbol}`;
-      elizaLogger10.debug("Formatted balances:", {
+      logger10.debug("Formatted balances:", {
         formattedFreeBalance,
         formattedReservedBalance,
         formattedTotalBalance
@@ -2098,7 +2037,7 @@ var GetBalanceAction = class {
         tokenDecimals
       };
     } catch (error) {
-      elizaLogger10.error(`Error fetching balance for address ${params.address}:`, error);
+      logger10.error(`Error fetching balance for address ${params.address}:`, error);
       throw new Error(`Failed to retrieve balance: ${error.message}`);
     }
   }
@@ -2108,12 +2047,12 @@ var getBalance_default = {
   similes: ["CHECK_POLKADOT_BALANCE", "VIEW_POLKADOT_BALANCE", "POLKADOT_BALANCE"],
   description: "Retrieves the balance information for a Polkadot address, including free, reserved, and total balances.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger10.log("Starting GET_POLKADOT_BALANCE action...");
+    logger10.log("Starting GET_POLKADOT_BALANCE action...");
     try {
       const getBalanceContent = await buildGetBalanceDetails(runtime, message, state);
-      elizaLogger10.debug("getBalanceContent", getBalanceContent);
+      logger10.debug("getBalanceContent", getBalanceContent);
       if (!getBalanceContent || typeof getBalanceContent.address !== "string") {
-        elizaLogger10.error("Failed to obtain a valid address.");
+        logger10.error("Failed to obtain a valid address.");
         if (callback) {
           callback({
             text: "I couldn't process your balance request. Please provide a valid Polkadot address.",
@@ -2154,7 +2093,7 @@ Note: Free balance is the amount available for transfers and transactions. Reser
       }
       return true;
     } catch (error) {
-      elizaLogger10.error("Error retrieving balance:", error);
+      logger10.error("Error retrieving balance:", error);
       if (callback) {
         callback({
           text: `Error retrieving balance: ${error.message}`,
@@ -2200,29 +2139,23 @@ Note: Free balance is the amount available for transfers and transactions. Reser
 };
 
 // src/actions/getBlockInfo.ts
-import {
-  elizaLogger as elizaLogger11,
-  ModelType as ModelType7,
-  composePromptFromState as composePromptFromState7,
-  parseJSONObjectFromText as parseJSONObjectFromText7
-} from "@elizaos/core";
+import { logger as logger11, ModelType as ModelType7, composePromptFromState as composePromptFromState7, parseJSONObjectFromText as parseJSONObjectFromText7 } from "@elizaos/core";
 import { z as z8 } from "zod";
 var blockInfoSchema = z8.object({
   blockNumberOrHash: z8.string().min(1, "Block number or hash is required")
 });
 var blockInfoTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
   Example response:
-  \`\`\`json
+
   {
     "blockNumberOrHash": "12345678" 
   }
-  \`\`\`
+
   or
-  \`\`\`json
+
   {
     "blockNumberOrHash": "0x1a2b3c4d5e6f..."
   }
-  \`\`\`
   
   {{recentMessages}}
 
@@ -2232,16 +2165,18 @@ async function buildGetBlockInfoDetails(runtime, _message, state) {
     state,
     template: blockInfoTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType7.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText7(response);
-    if (parsedResponse2) {
+    logger11.info(response);
+    parsedResponse = parseJSONObjectFromText7(response);
+    if (parsedResponse) {
       break;
     }
   }
+  logger11.info(parsedResponse);
   const validatedResponse = blockInfoSchema.safeParse(parsedResponse);
   if (!validatedResponse.success) {
     throw new Error("Failed to extract a valid block number or hash from the message");
@@ -2272,9 +2207,7 @@ var GetBlockInfoAction = class {
       if (params.blockNumberOrHash.startsWith("0x")) {
         blockHash = params.blockNumberOrHash;
       } else {
-        const hashResult = await api.rpc.chain.getBlockHash(
-          parseInt(params.blockNumberOrHash)
-        );
+        const hashResult = await api.rpc.chain.getBlockHash(parseInt(params.blockNumberOrHash));
         blockHash = hashResult.toString();
       }
       const [blockResult, eventsResult, timestampResult] = await Promise.allSettled([
@@ -2300,16 +2233,14 @@ var GetBlockInfoAction = class {
         parentHash: block.header.parentHash.toString(),
         stateRoot: block.header.stateRoot.toString(),
         extrinsicsRoot: block.header.extrinsicsRoot.toString(),
-        timestamp: timestamp !== null && timestamp !== void 0 ? new Date(
-          timestamp.toNumber()
-        ).toISOString() : "Unknown",
+        timestamp: timestamp !== null && timestamp !== void 0 ? new Date(timestamp.toNumber()).toISOString() : "Unknown",
         extrinsicsCount: block.extrinsics.toArray().length,
         // Convert to array first
         eventsCount: Array.isArray(events) ? events.length : 0
       };
       return blockInfo;
     } catch (error) {
-      elizaLogger11.error(`Error fetching block info for ${params.blockNumberOrHash}:`, error);
+      logger11.error(`Error fetching block info for ${params.blockNumberOrHash}:`, error);
       throw new Error(`Failed to retrieve block info: ${error.message}`);
     }
   }
@@ -2319,12 +2250,12 @@ var getBlockInfo_default = {
   similes: ["VIEW_BLOCK_INFO", "BLOCK_DETAILS", "POLKADOT_BLOCK_INFO"],
   description: "Retrieves detailed information about a Polkadot block by its number or hash.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger11.log("Starting GET_BLOCK_INFO action...");
+    logger11.log("Starting GET_BLOCK_INFO action...");
     try {
       const getBlockInfoContent = await buildGetBlockInfoDetails(runtime, message, state);
-      elizaLogger11.debug("getBlockInfoContent", getBlockInfoContent);
+      logger11.debug(getBlockInfoContent);
       if (!getBlockInfoContent || typeof getBlockInfoContent.blockNumberOrHash !== "string") {
-        elizaLogger11.error("Failed to obtain a valid block number or hash.");
+        logger11.error("Failed to obtain a valid block number or hash.");
         if (callback) {
           callback({
             text: "I couldn't process your block info request. Please provide a valid block number or hash.",
@@ -2375,7 +2306,7 @@ Block Content:
       }
       return true;
     } catch (error) {
-      elizaLogger11.error("Error retrieving block info:", error);
+      logger11.error("Error retrieving block info:", error);
       if (callback) {
         callback({
           text: `Error retrieving block info: ${error.message}`,
@@ -2421,12 +2352,7 @@ Block Content:
 };
 
 // src/actions/getBlockEvents.ts
-import {
-  elizaLogger as elizaLogger12,
-  ModelType as ModelType8,
-  composePromptFromState as composePromptFromState8,
-  parseJSONObjectFromText as parseJSONObjectFromText8
-} from "@elizaos/core";
+import { logger as logger12, ModelType as ModelType8, composePromptFromState as composePromptFromState8, parseJSONObjectFromText as parseJSONObjectFromText8 } from "@elizaos/core";
 import { z as z9 } from "zod";
 var blockEventsSchema = z9.object({
   blockNumberOrHash: z9.string().min(1, "Block number or hash is required"),
@@ -2555,38 +2481,36 @@ var GetBlockEventsAction = class {
       }
       const eventsAtBlock = await api.query.system.events.at(blockHash);
       const eventsArray = Array.from(eventsAtBlock);
-      let processedEvents = eventsArray.map(
-        (eventRecord, index) => {
-          const event = eventRecord.event;
-          const phase = eventRecord.phase;
-          const section = event.section.toString();
-          const method = event.method.toString();
-          const data = event.data.toJSON();
-          let phaseDesc = "Unknown";
-          try {
-            if (phase.isApplyExtrinsic) {
-              phaseDesc = `Extrinsic ${phase.asApplyExtrinsic?.toString() || "Unknown"}`;
-            } else if (phase.isFinalization) {
-              phaseDesc = "Finalization";
-            } else if (phase.isInitialization) {
-              phaseDesc = "Initialization";
-            } else {
-              phaseDesc = phase.type || "Unknown";
-            }
-          } catch {
-            phaseDesc = "Unknown";
+      let processedEvents = eventsArray.map((eventRecord, index) => {
+        const event = eventRecord.event;
+        const phase = eventRecord.phase;
+        const section = event.section.toString();
+        const method = event.method.toString();
+        const data = event.data.toJSON();
+        let phaseDesc = "Unknown";
+        try {
+          if (phase.isApplyExtrinsic) {
+            phaseDesc = `Extrinsic ${phase.asApplyExtrinsic?.toString() || "Unknown"}`;
+          } else if (phase.isFinalization) {
+            phaseDesc = "Finalization";
+          } else if (phase.isInitialization) {
+            phaseDesc = "Initialization";
+          } else {
+            phaseDesc = phase.type || "Unknown";
           }
-          const summary = createEventSummary(section, method, data);
-          return {
-            index,
-            section,
-            method,
-            dataCount: data.length,
-            phase: phaseDesc,
-            summary
-          };
+        } catch {
+          phaseDesc = "Unknown";
         }
-      );
+        const summary = createEventSummary(section, method, data);
+        return {
+          index,
+          section,
+          method,
+          dataCount: data.length,
+          phase: phaseDesc,
+          summary
+        };
+      });
       const totalEvents = processedEvents.length;
       if (params.filterModule) {
         processedEvents = processedEvents.filter(
@@ -2607,10 +2531,7 @@ var GetBlockEventsAction = class {
         limitApplied: params.limit
       };
     } catch (error) {
-      elizaLogger12.error(
-        `Error fetching events for block ${params.blockNumberOrHash}:`,
-        error
-      );
+      logger12.error(`Error fetching events for block ${params.blockNumberOrHash}:`, error);
       throw new Error(`Failed to retrieve block events: ${error.message}`);
     }
   }
@@ -2620,12 +2541,12 @@ var getBlockEvents_default = {
   similes: ["VIEW_BLOCK_EVENTS", "BLOCK_EVENTS", "POLKADOT_EVENTS", "GET_EVENTS"],
   description: "Retrieves all events that occurred in a specific Polkadot block, with optional filtering by module and limiting.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger12.log("Starting GET_BLOCK_EVENTS action...");
+    logger12.log("Starting GET_BLOCK_EVENTS action...");
     try {
       const getBlockEventsContent = await buildGetBlockEventsDetails(runtime, message, state);
-      elizaLogger12.debug("getBlockEventsContent", getBlockEventsContent);
+      logger12.debug("getBlockEventsContent", getBlockEventsContent);
       if (!getBlockEventsContent || typeof getBlockEventsContent.blockNumberOrHash !== "string") {
-        elizaLogger12.error("Failed to obtain a valid block number or hash.");
+        logger12.error("Failed to obtain a valid block number or hash.");
         if (callback) {
           callback({
             text: "I couldn't process your block events request. Please provide a valid block number or hash.",
@@ -2678,7 +2599,7 @@ ${eventsDisplay}${moreEventsText}` : "\u274C No events found with the applied fi
       }
       return true;
     } catch (error) {
-      elizaLogger12.error("Error retrieving block events:", error);
+      logger12.error("Error retrieving block events:", error);
       if (callback) {
         callback({
           text: `Error retrieving block events: ${error.message}`,
@@ -2739,12 +2660,7 @@ ${eventsDisplay}${moreEventsText}` : "\u274C No events found with the applied fi
 };
 
 // src/actions/getReferenda.ts
-import {
-  elizaLogger as elizaLogger13,
-  ModelType as ModelType9,
-  composePromptFromState as composePromptFromState9,
-  parseJSONObjectFromText as parseJSONObjectFromText9
-} from "@elizaos/core";
+import { logger as logger13, ModelType as ModelType9, composePromptFromState as composePromptFromState9, parseJSONObjectFromText as parseJSONObjectFromText9 } from "@elizaos/core";
 import { z as z10 } from "zod";
 var referendaSchema = z10.object({
   limit: z10.union([z10.number(), z10.string()]).optional().nullable().transform((val) => {
@@ -2780,13 +2696,13 @@ async function buildGetReferendaDetails(runtime, _message, state) {
     state,
     template: referendaTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType9.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText9(response);
-    if (parsedResponse2) {
+    parsedResponse = parseJSONObjectFromText9(response);
+    if (parsedResponse) {
       break;
     }
   }
@@ -2918,7 +2834,7 @@ var GetReferendaAction = class {
             referenda.push(referendum);
           }
         } catch (error) {
-          elizaLogger13.debug(`Skipping referendum ${i}: ${error.message}`);
+          logger13.debug(`Skipping referendum ${i}: ${error.message}`);
         }
       }
       return {
@@ -2927,7 +2843,7 @@ var GetReferendaAction = class {
         referenda
       };
     } catch (error) {
-      elizaLogger13.error("Error fetching referenda:", error);
+      logger13.error("Error fetching referenda:", error);
       throw new Error(`Failed to retrieve referenda: ${error.message}`);
     }
   }
@@ -2944,10 +2860,10 @@ var getReferenda_default = {
   ],
   description: "Retrieves recent governance referenda from Polkadot's OpenGov system. Shows referendum details including track, status, voting results, and deposits.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger13.log("Starting GET_REFERENDA action...");
+    logger13.log("Starting GET_REFERENDA action...");
     try {
       const getReferendaContent = await buildGetReferendaDetails(runtime, message, state);
-      elizaLogger13.debug("getReferendaContent", getReferendaContent);
+      logger13.debug("getReferendaContent", getReferendaContent);
       const action = new GetReferendaAction(runtime);
       const referendaInfo = await action.getReferenda(getReferendaContent.limit || 10);
       const referendaDisplay = referendaInfo.referenda.map((ref, idx) => {
@@ -2998,7 +2914,7 @@ ${referendaDisplay}` : "\u274C No referenda found."}
       }
       return true;
     } catch (error) {
-      elizaLogger13.error("Error retrieving referenda:", error);
+      logger13.error("Error retrieving referenda:", error);
       if (callback) {
         callback({
           text: `Error retrieving referenda: ${error.message}`,
@@ -3059,12 +2975,7 @@ ${referendaDisplay}` : "\u274C No referenda found."}
 };
 
 // src/actions/getReferendumDetails.ts
-import {
-  elizaLogger as elizaLogger14,
-  ModelType as ModelType10,
-  composePromptFromState as composePromptFromState10,
-  parseJSONObjectFromText as parseJSONObjectFromText10
-} from "@elizaos/core";
+import { logger as logger14, ModelType as ModelType10, composePromptFromState as composePromptFromState10, parseJSONObjectFromText as parseJSONObjectFromText10 } from "@elizaos/core";
 import { z as z11 } from "zod";
 var referendumDetailsSchema = z11.object({
   referendumId: z11.union([z11.number(), z11.string()]).transform((val) => {
@@ -3103,15 +3014,13 @@ async function buildGetReferendumDetailsRequest(runtime, _message, state) {
     state,
     template: referendumDetailsTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType10.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText10(
-      response
-    );
-    if (parsedResponse2) {
+    parsedResponse = parseJSONObjectFromText10(response);
+    if (parsedResponse) {
       break;
     }
   }
@@ -3198,7 +3107,7 @@ var GetReferendumDetailsAction = class {
         throw new Error(`Referendum ${referendumId} not found or has no data.`);
       }
       const info = typedReferendumInfo.unwrap().toJSON();
-      elizaLogger14.info(info);
+      logger14.info(info);
       let trackId;
       if (info.ongoing && typeof info.ongoing === "object" && info.ongoing.track !== void 0) {
         trackId = info.ongoing.track;
@@ -3247,15 +3156,9 @@ var GetReferendumDetailsAction = class {
             ayes: info.ongoing.tally.ayes?.toString() || "0",
             nays: info.ongoing.tally.nays?.toString() || "0",
             support: info.ongoing.tally.support?.toString() || "0",
-            formattedAyes: formatTokenAmount2(
-              info.ongoing.tally.ayes?.toString() || "0"
-            ),
-            formattedNays: formatTokenAmount2(
-              info.ongoing.tally.nays?.toString() || "0"
-            ),
-            formattedSupport: formatTokenAmount2(
-              info.ongoing.tally.support?.toString() || "0"
-            )
+            formattedAyes: formatTokenAmount2(info.ongoing.tally.ayes?.toString() || "0"),
+            formattedNays: formatTokenAmount2(info.ongoing.tally.nays?.toString() || "0"),
+            formattedSupport: formatTokenAmount2(info.ongoing.tally.support?.toString() || "0")
           };
         }
         referendum.inQueue = info.ongoing.inQueue || false;
@@ -3277,7 +3180,7 @@ var GetReferendumDetailsAction = class {
       }
       return referendum;
     } catch (error) {
-      elizaLogger14.error(`Error fetching referendum ${referendumId}:`, error);
+      logger14.error(`Error fetching referendum ${referendumId}:`, error);
       throw new Error(`Failed to retrieve referendum ${referendumId}: ${error.message}`);
     }
   }
@@ -3294,10 +3197,10 @@ var getReferendumDetails_default = {
   ],
   description: "Retrieves detailed information about a specific governance referendum from Polkadot's OpenGov system by referendum ID.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger14.log("Starting GET_REFERENDUM_DETAILS action...");
+    logger14.log("Starting GET_REFERENDUM_DETAILS action...");
     try {
       const detailsContent = await buildGetReferendumDetailsRequest(runtime, message, state);
-      elizaLogger14.debug("detailsContent", detailsContent);
+      logger14.debug("detailsContent", detailsContent);
       const action = new GetReferendumDetailsAction(runtime);
       const referendum = await action.getReferendumDetails(detailsContent.referendumId);
       let userMessageText = `
@@ -3390,7 +3293,7 @@ Queue Status: ${referendum.inQueue ? "In queue" : "Not in queue"}`;
       }
       return true;
     } catch (error) {
-      elizaLogger14.error("Error retrieving referendum details:", error);
+      logger14.error("Error retrieving referendum details:", error);
       if (callback) {
         callback({
           text: `Error retrieving referendum details: ${error.message}`,
@@ -3451,7 +3354,7 @@ Queue Status: ${referendum.inQueue ? "In queue" : "Not in queue"}`;
 };
 
 // src/providers/networkData.ts
-import { elizaLogger as elizaLogger15 } from "@elizaos/core";
+import { logger as logger15 } from "@elizaos/core";
 var ChainDataService = class {
   apiService;
   async initialize(runtime) {
@@ -3505,7 +3408,7 @@ var ChainDataService = class {
         count = parseInt(validatorCount.toString());
       } catch (innerError) {
         const message = innerError instanceof Error ? innerError.message : String(innerError);
-        elizaLogger15.error(`Error fetching validator count: ${message}`);
+        logger15.error(`Error fetching validator count: ${message}`);
       }
     }
     return count;
@@ -3522,7 +3425,7 @@ var ChainDataService = class {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      elizaLogger15.error(`Error fetching parachain count: ${message}`);
+      logger15.error(`Error fetching parachain count: ${message}`);
     }
     return count;
   }
@@ -3556,7 +3459,7 @@ var networkDataProvider = {
         output += `
 - Connected Parachains: ${parachainCount}`;
       }
-      elizaLogger15.info("Network Data Provider output generated", output);
+      logger15.info("Network Data Provider output generated", output);
       return {
         text: output,
         data: {
@@ -3565,7 +3468,7 @@ var networkDataProvider = {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      elizaLogger15.error(`Error in Network Data Provider: ${message}`);
+      logger15.error(`Error in Network Data Provider: ${message}`);
       return {
         text: "Network Data Provider: Unable to retrieve current network status.",
         data: {
@@ -3578,12 +3481,7 @@ var networkDataProvider = {
 var networkData_default = networkDataProvider;
 
 // src/actions/transferFunds.ts
-import {
-  elizaLogger as elizaLogger16,
-  ModelType as ModelType11,
-  composePromptFromState as composePromptFromState11,
-  parseJSONObjectFromText as parseJSONObjectFromText11
-} from "@elizaos/core";
+import { logger as logger16, ModelType as ModelType11, composePromptFromState as composePromptFromState11, parseJSONObjectFromText as parseJSONObjectFromText11 } from "@elizaos/core";
 import { z as z12 } from "zod";
 var transferFundsSchema = z12.object({
   recipientAddress: z12.string(),
@@ -3619,13 +3517,13 @@ async function buildTransferFundsDetails(runtime, message, state) {
     state: currentState,
     template: transferFundsTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType11.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText11(response);
-    if (parsedResponse2) {
+    parsedResponse = parseJSONObjectFromText11(response);
+    if (parsedResponse) {
       break;
     }
   }
@@ -3667,13 +3565,13 @@ var TransferFundsAction = class {
     }
     const apiService = await PolkadotApiService.start(this.runtime);
     const api = await apiService.getConnection();
-    elizaLogger16.debug("API connection established");
+    logger16.debug("API connection established");
     const properties = await api.rpc.system.properties();
     const tokenDecimals = properties.tokenDecimals.unwrap()[0].toNumber();
     const amount = BigInt(params.amount) * BigInt(10 ** tokenDecimals);
     const transfer = api.tx.balances.transferAllowDeath(params.recipientAddress, amount);
     if (params.dryRun) {
-      elizaLogger16.debug(
+      logger16.debug(
         `DRY RUN: Transfer of ${params.amount} DOT to ${params.recipientAddress} would be initiated.`
       );
       return {
@@ -3683,7 +3581,7 @@ var TransferFundsAction = class {
       };
     }
     const hash = await transfer.signAndSend(keypair);
-    elizaLogger16.debug(
+    logger16.debug(
       `Transfer of ${params.amount} DOT to ${params.recipientAddress} initiated. Transaction hash: ${hash.toHex()}`
     );
     return {
@@ -3705,11 +3603,11 @@ var transferFunds_default = {
   ],
   description: "Transfers native tokens to another address.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger16.log("Starting POLKADOT_TRANSFER action...");
+    logger16.log("Starting POLKADOT_TRANSFER action...");
     const transferFundsContent = await buildTransferFundsDetails(runtime, message, state);
-    elizaLogger16.debug("transferFundsContent", transferFundsContent);
+    logger16.debug("transferFundsContent", transferFundsContent);
     if (!transferFundsContent || !transferFundsContent.recipientAddress || !transferFundsContent.amount) {
-      elizaLogger16.error("Failed to obtain required transfer details.");
+      logger16.error("Failed to obtain required transfer details.");
       if (callback) {
         callback({
           text: "Unable to process transfer request. Could not obtain recipient address or amount.",
@@ -3738,7 +3636,7 @@ var transferFunds_default = {
       }
       return true;
     } catch (error) {
-      elizaLogger16.error("Error transferring funds:", error);
+      logger16.error("Error transferring funds:", error);
       if (callback) {
         callback({
           text: `Error transferring funds: ${error.message}`,
@@ -3784,12 +3682,7 @@ var transferFunds_default = {
 };
 
 // src/actions/crossChainTransfer.ts
-import {
-  elizaLogger as elizaLogger17,
-  ModelType as ModelType12,
-  composePromptFromState as composePromptFromState12,
-  parseJSONObjectFromText as parseJSONObjectFromText12
-} from "@elizaos/core";
+import { logger as logger17, ModelType as ModelType12, composePromptFromState as composePromptFromState12, parseJSONObjectFromText as parseJSONObjectFromText12 } from "@elizaos/core";
 import { AssetTransferApi, constructApiPromise } from "@substrate/asset-transfer-api";
 
 // src/utils/chainRegistryUtils.ts
@@ -3914,15 +3807,13 @@ async function buildCrossChainTransferDetails(runtime, _message, state) {
     state,
     template: crossChainTransferTemplate
   });
-  const parsedResponse = null;
+  let parsedResponse = null;
   for (let i = 0; i < 5; i++) {
     const response = await runtime.useModel(ModelType12.TEXT_SMALL, {
       prompt
     });
-    const parsedResponse2 = parseJSONObjectFromText12(
-      response
-    );
-    if (parsedResponse2) {
+    parsedResponse = parseJSONObjectFromText12(response);
+    if (parsedResponse) {
       break;
     }
   }
@@ -3982,10 +3873,10 @@ var CrossChainTransferAction = class {
         xcmVersion: this.assetApi.safeXcmVersion
       }
     );
-    elizaLogger17.debug("Transfer transaction created:", {
+    logger17.debug("Transfer transaction created:", {
       callInfoTx: callInfo.tx
     });
-    elizaLogger17.log("Attempting to dry run the transaction...");
+    logger17.log("Attempting to dry run the transaction...");
     const dryRunResult = await this.assetApi.dryRunCall(
       keypair.address,
       callInfo.tx,
@@ -3993,19 +3884,19 @@ var CrossChainTransferAction = class {
       this.assetApi.safeXcmVersion
     );
     if (dryRunResult === null) {
-      elizaLogger17.warn("Dry run did not return a result. Proceeding with caution.");
+      logger17.warn("Dry run did not return a result. Proceeding with caution.");
     } else if (dryRunResult.isErr) {
-      elizaLogger17.error("Transaction dry run failed:", dryRunResult.asErr.toHuman());
+      logger17.error("Transaction dry run failed:", dryRunResult.asErr.toHuman());
       throw new Error(`Transaction dry run failed: ${dryRunResult.asErr.toString()}`);
     } else {
-      elizaLogger17.log("Transaction dry run successful:", dryRunResult.asOk.toHuman());
+      logger17.log("Transaction dry run successful:", dryRunResult.asOk.toHuman());
     }
     let decodedTxString = void 0;
     try {
       decodedTxString = this.assetApi.decodeExtrinsic(callInfo.tx, "call");
-      elizaLogger17.debug("Decoded transaction:", JSON.parse(decodedTxString));
+      logger17.debug("Decoded transaction:", JSON.parse(decodedTxString));
     } catch (decodeError) {
-      elizaLogger17.warn("Failed to decode transaction:", decodeError);
+      logger17.warn("Failed to decode transaction:", decodeError);
     }
     if (dryRun) {
       return {
@@ -4023,7 +3914,7 @@ var CrossChainTransferAction = class {
         xcmVersion: this.assetApi.safeXcmVersion
       }
     );
-    elizaLogger17.log("Signing and sending the transaction...");
+    logger17.log("Signing and sending the transaction...");
     let hash = void 0;
     const unsub = await submitableTransaction.tx.signAndSend(keypair, (result) => {
       console.log(`Current status is ${result.status}`);
@@ -4048,11 +3939,11 @@ var crossChainTransfer_default = {
   similes: ["CROSS_CHAIN_SEND", "XCM_TRANSFER"],
   description: "Transfers tokens across different chains in the Polkadot ecosystem using XCM. Supports transfers between relay chains and parachains.",
   handler: async (runtime, message, state, _options, callback) => {
-    elizaLogger17.log("Starting CROSS_CHAIN_TRANSFER action...");
+    logger17.log("Starting CROSS_CHAIN_TRANSFER action...");
     const transferContent = await buildCrossChainTransferDetails(runtime, message, state);
-    elizaLogger17.debug("crossChainTransferContent", transferContent);
+    logger17.debug("crossChainTransferContent", transferContent);
     if (!transferContent || !transferContent.recipientAddress || !transferContent.amount || !transferContent.destinationChain) {
-      elizaLogger17.error("Failed to obtain required transfer details.");
+      logger17.error("Failed to obtain required transfer details.");
       if (callback) {
         callback({
           text: "Unable to process cross-chain transfer request. Could not obtain required details.",
@@ -4088,7 +3979,7 @@ var crossChainTransfer_default = {
       }
       return true;
     } catch (error) {
-      elizaLogger17.error("Error in cross-chain transfer:", error);
+      logger17.error("Error in cross-chain transfer:", error);
       if (callback) {
         callback({
           text: `Error in cross-chain transfer: ${error.message}`,
@@ -4134,9 +4025,25 @@ var crossChainTransfer_default = {
 };
 
 // src/index.ts
+import { logger as logger18 } from "@elizaos/core/v2";
 var polkadotPlugin = {
   name: "polkadot",
   description: "Polkadot Plugin for Eliza",
+  init: async (config, runtime) => {
+    logger18.log("Polkadot Plugin initialized");
+    const rpcUrl = runtime.getSetting("POLKADOT_RPC_URL");
+    if (!rpcUrl) {
+      logger18.warn("POLKADOT_RPC_URL not provided");
+    }
+    const privateKey = runtime.getSetting("POLKADOT_PRIVATE_KEY");
+    if (!privateKey) {
+      logger18.warn("POLKADOT_PRIVATE_KEY not provided");
+    }
+    const coinmarketcapApiKey = runtime.getSetting("COINMARKETCAP_API_KEY");
+    if (!coinmarketcapApiKey) {
+      logger18.warn("COINMARKETCAP_API_KEY not provided");
+    }
+  },
   actions: [
     createWallet_default,
     ejectWallet_default,

@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { z } from 'zod';
 import { PolkadotApiService } from '../services/api-service';
 
@@ -128,12 +123,12 @@ export async function buildGetReferendaDetails(
         template: referendaTemplate,
     });
 
-    const parsedResponse: GetReferendaContent | null = null;
+    let parsedResponse: GetReferendaContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(response) as GetReferendaContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as GetReferendaContent | null;
         if (parsedResponse) {
             break;
         }
@@ -315,7 +310,7 @@ export class GetReferendaAction {
                     }
                 } catch (error) {
                     // Skip referenda that can't be fetched
-                    elizaLogger.debug(`Skipping referendum ${i}: ${(error as Error).message}`);
+                    logger.debug(`Skipping referendum ${i}: ${(error as Error).message}`);
                 }
             }
 
@@ -325,7 +320,7 @@ export class GetReferendaAction {
                 referenda,
             };
         } catch (error) {
-            elizaLogger.error('Error fetching referenda:', error);
+            logger.error('Error fetching referenda:', error);
             throw new Error(`Failed to retrieve referenda: ${(error as Error).message}`);
         }
     }
@@ -350,12 +345,12 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting GET_REFERENDA action...');
+        logger.log('Starting GET_REFERENDA action...');
 
         try {
             const getReferendaContent = await buildGetReferendaDetails(runtime, message, state);
 
-            elizaLogger.debug('getReferendaContent', getReferendaContent);
+            logger.debug('getReferendaContent', getReferendaContent);
 
             const action = new GetReferendaAction(runtime);
             const referendaInfo = await action.getReferenda(getReferendaContent.limit || 10);
@@ -422,7 +417,7 @@ ${
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error retrieving referenda:', error);
+            logger.error('Error retrieving referenda:', error);
             if (callback) {
                 callback({
                     text: `Error retrieving referenda: ${(error as Error).message}`,

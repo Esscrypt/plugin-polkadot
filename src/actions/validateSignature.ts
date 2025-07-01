@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { WALLET_CACHE_KEY, WalletProvider, initWalletProvider } from '../providers/wallet';
 import type { OptimizedWalletCache } from '../providers/wallet';
 import { stringToU8a, hexToU8a } from '@polkadot/util';
@@ -152,12 +147,12 @@ export async function buildValidateSignatureDetails(
         template: validateSignatureTemplate,
     });
 
-    const parsedResponse: ValidateSignatureContent | null = null;
+    let parsedResponse: ValidateSignatureContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(response) as ValidateSignatureContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as ValidateSignatureContent | null;
         if (parsedResponse) {
             break;
         }
@@ -201,7 +196,7 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting VALIDATE_POLKADOT_SIGNATURE action...');
+        logger.log('Starting VALIDATE_POLKADOT_SIGNATURE action...');
 
         const validateSignatureContent = await buildValidateSignatureDetails(
             runtime,
@@ -222,7 +217,7 @@ export default {
         }
 
         try {
-            elizaLogger.debug('validateSignatureContent', validateSignatureContent);
+            logger.debug('validateSignatureContent', validateSignatureContent);
             const {
                 message: messageToVerify,
                 signature,
@@ -250,7 +245,7 @@ export default {
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error validating signature:', error);
+            logger.error('Error validating signature:', error);
             if (callback) {
                 callback({
                     text: `Error validating signature: ${error.message}`,

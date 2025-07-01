@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { PolkadotApiService } from '../services/api-service';
 import { z } from 'zod';
 
@@ -293,10 +288,7 @@ export class GetBlockEventsAction {
                 limitApplied: params.limit,
             };
         } catch (error) {
-            elizaLogger.error(
-                `Error fetching events for block ${params.blockNumberOrHash}:`,
-                error,
-            );
+            logger.error(`Error fetching events for block ${params.blockNumberOrHash}:`, error);
             throw new Error(`Failed to retrieve block events: ${(error as Error).message}`);
         }
     }
@@ -314,18 +306,18 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting GET_BLOCK_EVENTS action...');
+        logger.log('Starting GET_BLOCK_EVENTS action...');
 
         try {
             const getBlockEventsContent = await buildGetBlockEventsDetails(runtime, message, state);
 
-            elizaLogger.debug('getBlockEventsContent', getBlockEventsContent);
+            logger.debug('getBlockEventsContent', getBlockEventsContent);
 
             if (
                 !getBlockEventsContent ||
                 typeof getBlockEventsContent.blockNumberOrHash !== 'string'
             ) {
-                elizaLogger.error('Failed to obtain a valid block number or hash.');
+                logger.error('Failed to obtain a valid block number or hash.');
                 if (callback) {
                     callback({
                         text: "I couldn't process your block events request. Please provide a valid block number or hash.",
@@ -401,7 +393,7 @@ ${
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error retrieving block events:', error);
+            logger.error('Error retrieving block events:', error);
             if (callback) {
                 callback({
                     text: `Error retrieving block events: ${(error as Error).message}`,

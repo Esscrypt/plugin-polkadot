@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { z } from 'zod';
 import { formatBalance } from '@polkadot/util';
 import { PolkadotApiService } from '../services/api-service';
@@ -39,19 +34,24 @@ export async function buildGetBalanceDetails(
         template: addressTemplate,
     });
 
-    const parsedResponse: GetBalanceContent | null = null;
+    let parsedResponse: GetBalanceContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(response) as GetBalanceContent | null;
+        logger.info(response);
+        parsedResponse = parseJSONObjectFromText(response) as GetBalanceContent;
         if (parsedResponse) {
             break;
         }
     }
 
+    logger.info(parsedResponse);
+
     //zod validate the response
     const validatedResponse = getBalanceSchema.safeParse(parsedResponse);
+
+    logger.info(validatedResponse);
 
     if (!validatedResponse.success) {
         throw new Error('Failed to extract a valid Polkadot address from the message');
@@ -79,20 +79,20 @@ export class GetBalanceAction {
         tokenDecimals: number;
     }> {
         try {
-            elizaLogger.debug('Initializing getBalance for address:', params.address);
+            logger.debug('Initializing getBalance for address:', params.address);
             const apiService = await PolkadotApiService.start(this.runtime);
             const api = await apiService.getConnection();
-            elizaLogger.debug('API connection established');
+            logger.debug('API connection established');
 
             const accountInfo = await api.query.system.account(params.address);
-            elizaLogger.debug('Account info retrieved:', accountInfo.toHuman());
+            logger.debug('Account info retrieved:', accountInfo.toHuman());
             const balance = accountInfo.toJSON() as { data: { free: string; reserved: string } };
 
             const properties = await api.rpc.system.properties();
-            elizaLogger.debug('Chain properties retrieved:', properties.toHuman());
+            logger.debug('Chain properties retrieved:', properties.toHuman());
             const tokenSymbol = properties.tokenSymbol.unwrap()[0].toString();
             const tokenDecimals = properties.tokenDecimals.unwrap()[0].toNumber();
-            elizaLogger.debug('Token details:', { tokenSymbol, tokenDecimals });
+            logger.debug('Token details:', { tokenSymbol, tokenDecimals });
 
             formatBalance.setDefaults({
                 decimals: tokenDecimals,
@@ -109,7 +109,7 @@ export class GetBalanceAction {
             const totalBalance = (
                 BigInt(balance.data.free) + BigInt(balance.data.reserved)
             ).toString();
-            elizaLogger.debug('Balance calculations completed:', {
+            logger.debug('Balance calculations completed:', {
                 freeBalance,
                 reservedBalance,
                 totalBalance,
@@ -127,7 +127,7 @@ export class GetBalanceAction {
                 BigInt(balance.data.free) + BigInt(balance.data.reserved),
                 formatOptions,
             )} ${tokenSymbol}`;
-            elizaLogger.debug('Formatted balances:', {
+            logger.debug('Formatted balances:', {
                 formattedFreeBalance,
                 formattedReservedBalance,
                 formattedTotalBalance,
@@ -145,7 +145,7 @@ export class GetBalanceAction {
                 tokenDecimals,
             };
         } catch (error) {
-            elizaLogger.error(`Error fetching balance for address ${params.address}:`, error);
+            logger.error(`Error fetching balance for address ${params.address}:`, error);
             throw new Error(`Failed to retrieve balance: ${(error as Error).message}`);
         }
     }
@@ -163,15 +163,15 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting GET_POLKADOT_BALANCE action...');
+        logger.log('Starting GET_POLKADOT_BALANCE action...');
 
         try {
             const getBalanceContent = await buildGetBalanceDetails(runtime, message, state);
 
-            elizaLogger.debug('getBalanceContent', getBalanceContent);
+            logger.debug('getBalanceContent', getBalanceContent);
 
             if (!getBalanceContent || typeof getBalanceContent.address !== 'string') {
-                elizaLogger.error('Failed to obtain a valid address.');
+                logger.error('Failed to obtain a valid address.');
                 if (callback) {
                     callback({
                         text: "I couldn't process your balance request. Please provide a valid Polkadot address.",
@@ -217,7 +217,7 @@ Note: Free balance is the amount available for transfers and transactions. Reser
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error retrieving balance:', error);
+            logger.error('Error retrieving balance:', error);
             if (callback) {
                 callback({
                     text: `Error retrieving balance: ${(error as Error).message}`,
