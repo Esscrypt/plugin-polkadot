@@ -1,6 +1,6 @@
 import { naclDecrypt, naclEncrypt, randomAsU8a, pbkdf2Encode } from '@polkadot/util-crypto';
 import { stringToU8a, u8aToString, u8aToHex, hexToU8a } from '@polkadot/util';
-import { elizaLogger } from '@elizaos/core';
+import { logger } from '@elizaos/core';
 
 /**
  * Encrypts text using NaCl encryption with PBKDF2 key derivation
@@ -32,7 +32,7 @@ export function encrypt(text: string, password: string): string {
 
         return `${kdfSaltHex}:${nonceHex}:${encryptedHex}`;
     } catch (error) {
-        elizaLogger.error('Encryption error:', error);
+        logger.error('Encryption error:', error);
         throw new Error(`Failed to encrypt data: ${error.message}`);
     }
 }
@@ -78,7 +78,7 @@ export function decrypt(encryptedString: string, password: string): string {
 
         return decryptedText;
     } catch (error) {
-        elizaLogger.error('Decryption error:', error.message);
+        logger.error('Decryption error:', error.message);
         throw new Error(`Failed to decrypt data: ${error.message}`);
     }
 }

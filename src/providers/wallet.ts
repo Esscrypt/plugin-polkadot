@@ -1,5 +1,5 @@
 import type { IAgentRuntime, Memory, Provider, State, ProviderResult } from '@elizaos/core';
-import { elizaLogger } from '@elizaos/core';
+import { logger } from '@elizaos/core';
 
 import * as path from 'node:path'; // Changed to use node: protocol
 import type BigNumber from 'bignumber.js';
@@ -122,7 +122,7 @@ export class WalletProvider {
         this.runtime = params.runtime;
         this.coinMarketCapApiKey = process.env.COINMARKETCAP_API_KEY || '';
         if (!this.coinMarketCapApiKey) {
-            elizaLogger.warn('COINMARKETCAP_API_KEY is not set. Price fetching will likely fail.');
+            logger.warn('COINMARKETCAP_API_KEY is not set. Price fetching will likely fail.');
         }
 
         const { source } = params;
@@ -141,7 +141,7 @@ export class WalletProvider {
             dispatchMap[source.type]();
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            elizaLogger.error(`WalletProvider constructor failed: ${message}`);
+            logger.error(`WalletProvider constructor failed: ${message}`);
             throw new Error(`Failed to initialize WalletProvider: ${message}`);
         }
 
@@ -157,24 +157,24 @@ export class WalletProvider {
         wallet: WalletProvider,
         walletNumber?: number,
     ): Promise<void> {
-        elizaLogger.debug('Starting storeWalletInCache for address:', address);
+        logger.debug('Starting storeWalletInCache for address:', address);
 
         let cache: OptimizedWalletCache;
         try {
             const cachedData =
                 await wallet.runtime.getCache<OptimizedWalletCache>(WALLET_CACHE_KEY);
             if (cachedData) {
-                elizaLogger.debug('Retrieved existing cache');
+                logger.debug('Retrieved existing cache');
                 cache = cachedData;
             } else {
-                elizaLogger.debug('No existing cache found, creating new one');
+                logger.debug('No existing cache found, creating new one');
                 cache = {
                     wallets: {},
                     numberToAddress: {},
                 };
             }
         } catch (error) {
-            elizaLogger.error('Error retrieving cache, creating new one:', {
+            logger.error('Error retrieving cache, creating new one:', {
                 error:
                     error instanceof Error
                         ? {
@@ -192,7 +192,7 @@ export class WalletProvider {
 
         const finalWalletNumber =
             walletNumber ?? (await WalletProvider.getWalletNumberFromCache(address, cache));
-        elizaLogger.debug('Assigned wallet number:', finalWalletNumber);
+        logger.debug('Assigned wallet number:', finalWalletNumber);
 
         // Only store serializable data
         const walletData = {
@@ -218,9 +218,9 @@ export class WalletProvider {
 
         try {
             await wallet.runtime.setCache(WALLET_CACHE_KEY, cache);
-            elizaLogger.debug('Successfully stored wallet in cache');
+            logger.debug('Successfully stored wallet in cache');
         } catch (error) {
-            elizaLogger.error('Failed to store wallet in cache:', {
+            logger.error('Failed to store wallet in cache:', {
                 error:
                     error instanceof Error
                         ? {
@@ -258,7 +258,7 @@ export class WalletProvider {
             }
             return files.length; // Fixed: return the actual number of files
         } catch (_error) {
-            elizaLogger.warn(
+            logger.warn(
                 'Error reading backup directory for wallet numbering, defaulting to 1:',
                 _error,
             );
@@ -446,24 +446,19 @@ export class WalletProvider {
         if (softDerivation) {
             suri = `${suri}/${softDerivation}`;
         }
-        elizaLogger.debug(
-            'Generated SURI for keyring init:',
-            suri,
-            'with options:',
-            keyringOptions,
-        );
+        logger.debug('Generated SURI for keyring init:', suri, 'with options:', keyringOptions);
         this.keyring.addFromUri(suri, { name: pairName }, keyringOptions.type);
     }
 
     // Private handler methods for initialization logic
     private _initializeFromMnemonic(source: WalletSourceFromMnemonic): void {
         try {
-            elizaLogger.debug('Initializing wallet from mnemonic');
+            logger.debug('Initializing wallet from mnemonic');
             const opts = source.keyringOptions || {
                 type: PROVIDER_CONFIG.DEFAULT_KEYRING_TYPE,
                 ss58Format: PROVIDER_CONFIG.DEFAULT_KEYRING_SS58_FORMAT,
             };
-            elizaLogger.debug('Using keyring options:', opts);
+            logger.debug('Using keyring options:', opts);
 
             this._initKeyringFromDetails(
                 source.mnemonic,
@@ -473,9 +468,9 @@ export class WalletProvider {
                 source.softDerivation,
                 'main pair', // Specific name for this initialization path
             );
-            elizaLogger.debug('Wallet initialized successfully from mnemonic');
+            logger.debug('Wallet initialized successfully from mnemonic');
         } catch (error) {
-            elizaLogger.error('Error initializing from mnemonic:', {
+            logger.error('Error initializing from mnemonic:', {
                 error:
                     error instanceof Error
                         ? {
@@ -491,25 +486,23 @@ export class WalletProvider {
 
     private _initializeFromEncryptedJson(source: WalletSourceFromEncryptedJson): void {
         try {
-            elizaLogger.debug('Initializing wallet from encrypted JSON');
-            elizaLogger.debug('Encrypted data length:', source.encryptedJson.length);
+            logger.debug('Initializing wallet from encrypted JSON');
+            logger.debug('Encrypted data length:', source.encryptedJson.length);
 
             const decryptedJson = decrypt(source.encryptedJson, source.password); // source.password is for decryption
-            elizaLogger.debug('Decrypted JSON length:', decryptedJson.length);
-            // elizaLogger.debug('Decrypted JSON content:', decryptedJson); // Avoid logging potentially sensitive mnemonics
+            logger.debug('Decrypted JSON length:', decryptedJson.length);
+            // logger.debug('Decrypted JSON content:', decryptedJson); // Avoid logging potentially sensitive mnemonics
 
             let walletData: DecryptedWalletBackupData;
             try {
-                elizaLogger.debug(
-                    'Attempting to parse and validate decrypted JSON for wallet data',
-                );
+                logger.debug('Attempting to parse and validate decrypted JSON for wallet data');
                 const parsedJson: unknown = JSON.parse(decryptedJson);
                 walletData = decryptedWalletBackupDataSchema.parse(
                     parsedJson,
                 ) as DecryptedWalletBackupData;
-                elizaLogger.debug('Successfully parsed and validated wallet data structure');
+                logger.debug('Successfully parsed and validated wallet data structure');
             } catch (parseError) {
-                elizaLogger.error('JSON Parse or Validation Error:', {
+                logger.error('JSON Parse or Validation Error:', {
                     error:
                         parseError instanceof Error
                             ? {
@@ -524,7 +517,7 @@ export class WalletProvider {
             }
 
             if (!walletData.mnemonic || !walletData.options) {
-                elizaLogger.error(
+                logger.error(
                     'Missing required fields (mnemonic or options) in parsed wallet data.',
                 );
                 throw new Error('Decrypted data missing required fields (mnemonic or options)');
@@ -533,7 +526,7 @@ export class WalletProvider {
             // Ensure options has a type, default if not present (though it should be by generator)
             const keyringInitOptions = walletData.options;
             if (!keyringInitOptions.type) {
-                elizaLogger.warn(
+                logger.warn(
                     'Keyring type missing in decrypted options, defaulting to ed25519 as per PROVIDER_CONFIG',
                 );
                 keyringInitOptions.type = PROVIDER_CONFIG.DEFAULT_KEYRING_TYPE;
@@ -542,7 +535,7 @@ export class WalletProvider {
                 keyringInitOptions.ss58Format === undefined ||
                 keyringInitOptions.ss58Format === null
             ) {
-                elizaLogger.warn(
+                logger.warn(
                     'ss58Format missing in decrypted options, defaulting as per PROVIDER_CONFIG',
                 );
                 keyringInitOptions.ss58Format = PROVIDER_CONFIG.DEFAULT_KEYRING_SS58_FORMAT;
@@ -556,9 +549,9 @@ export class WalletProvider {
                 walletData.softDerivation,
                 'imported main pair', // Specific name for this initialization path
             );
-            elizaLogger.debug('Wallet initialized successfully from encrypted JSON');
+            logger.debug('Wallet initialized successfully from encrypted JSON');
         } catch (error) {
-            elizaLogger.error('Error initializing from encrypted JSON:', {
+            logger.error('Error initializing from encrypted JSON:', {
                 error:
                     error instanceof Error
                         ? {
@@ -710,7 +703,7 @@ export class WalletProvider {
             fs.writeFileSync(filePath, encryptedMnemonicAndOptions, {
                 encoding: 'utf-8',
             });
-            elizaLogger.log(`Wallet backup saved to ${filePath}`);
+            logger.log(`Wallet backup saved to ${filePath}`);
 
             // Get the next wallet number from filesystem
             const walletNumber = WalletProvider.getNextWalletNumberFromFilesystem();
@@ -726,7 +719,7 @@ export class WalletProvider {
                 walletNumber,
             };
         } catch (error) {
-            elizaLogger.error('Error in wallet generation:', {
+            logger.error('Error in wallet generation:', {
                 error:
                     error instanceof Error
                         ? {
@@ -784,27 +777,25 @@ export class WalletProvider {
         const encryptedFileContent = fs.readFileSync(filePath, {
             encoding: 'utf-8',
         });
-        elizaLogger.debug('Read encrypted file content, length:', encryptedFileContent.length);
+        logger.debug('Read encrypted file content, length:', encryptedFileContent.length);
 
         const decryptedFileJson = decrypt(encryptedFileContent, password);
-        elizaLogger.debug('Decrypted file content length:', decryptedFileJson.length); // Avoid logging content
+        logger.debug('Decrypted file content length:', decryptedFileJson.length); // Avoid logging content
 
         try {
             const parsedJson: unknown = JSON.parse(decryptedFileJson);
             const walletData = decryptedWalletBackupDataSchema.parse(
                 parsedJson,
             ) as DecryptedWalletBackupData;
-            elizaLogger.debug('Successfully parsed and validated wallet data from ejected file'); // Avoid logging directly
-            elizaLogger.log(
-                `Wallet ejected from file ${filePath}, revealing mnemonic and options.`,
-            );
+            logger.debug('Successfully parsed and validated wallet data from ejected file'); // Avoid logging directly
+            logger.log(`Wallet ejected from file ${filePath}, revealing mnemonic and options.`);
 
             // Get the cache from the current instance
             await WalletProvider.clearWalletFromCache(wallet, walletAddressForBackupName);
 
             return walletData;
         } catch (parseError) {
-            elizaLogger.error('JSON Parse or Validation Error in ejectWalletFromFile:', {
+            logger.error('JSON Parse or Validation Error in ejectWalletFromFile:', {
                 error:
                     parseError instanceof Error
                         ? {
@@ -834,7 +825,7 @@ export class WalletProvider {
         };
         const walletProvider = new WalletProvider(constructionParams);
 
-        elizaLogger.log(
+        logger.log(
             `Wallet imported successfully via encrypted JSON, address: ${walletProvider.getAddress()}`,
         );
         return walletProvider;
@@ -899,7 +890,7 @@ export class WalletProvider {
         const fileName = `${address}_wallet_backup.json`;
         const filePath = path.join(backupDir, fileName);
         fs.writeFileSync(filePath, encryptedBackup, { encoding: 'utf-8' });
-        elizaLogger.log(`Wallet backup for imported mnemonic saved to ${filePath}`);
+        logger.log(`Wallet backup for imported mnemonic saved to ${filePath}`);
 
         // Assign a wallet number and cache the wallet
         const walletNumber = WalletProvider.getNextWalletNumberFromFilesystem();
@@ -918,7 +909,7 @@ export class WalletProvider {
 export const initWalletProvider = async (runtime: IAgentRuntime) => {
     let mnemonic = runtime.getSetting('POLKADOT_PRIVATE_KEY');
     if (!mnemonic) {
-        elizaLogger.error('POLKADOT_PRIVATE_KEY is missing');
+        logger.error('POLKADOT_PRIVATE_KEY is missing');
         mnemonic = mnemonicGenerate(24);
     }
 
@@ -945,7 +936,7 @@ export const initWalletProvider = async (runtime: IAgentRuntime) => {
         },
     });
 
-    elizaLogger.log(`Wallet initialized from settings, address: ${walletProvider.getAddress()}`);
+    logger.log(`Wallet initialized from settings, address: ${walletProvider.getAddress()}`);
     return walletProvider;
 };
 
@@ -960,11 +951,11 @@ export const nativeWalletProvider: Provider = {
                     walletProvider.coinMarketCapApiKey,
                     walletProvider.getAddress(),
                 );
-                elizaLogger.log(formattedPortfolio);
+                logger.log(formattedPortfolio);
                 return { text: formattedPortfolio };
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                elizaLogger.error(
+                logger.error(
                     `Error in ${PROVIDER_CONFIG.NATIVE_TOKEN_SYMBOL.toUpperCase()} wallet provider:`,
                     message,
                 );

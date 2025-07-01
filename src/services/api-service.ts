@@ -1,4 +1,4 @@
-import { elizaLogger } from '@elizaos/core';
+import { logger } from '@elizaos/core';
 import { ApiPromise, WsProvider } from '@polkadot/api';
 import { Service, IAgentRuntime } from '@elizaos/core';
 
@@ -53,9 +53,9 @@ export class PolkadotApiService extends Service {
 
         if (customEndpoint) {
             this.networkConfig.DEFAULT_ENDPOINT = customEndpoint;
-            elizaLogger.debug(`Using custom Polkadot endpoint: ${customEndpoint}`);
+            logger.debug(`Using custom Polkadot endpoint: ${customEndpoint}`);
         } else {
-            elizaLogger.debug(
+            logger.debug(
                 `No custom endpoint found, using default: ${this.networkConfig.DEFAULT_ENDPOINT}`,
             );
         }
@@ -95,20 +95,20 @@ export class PolkadotApiService extends Service {
     private async connectWithRetry(retryCount = 0): Promise<ApiPromise> {
         try {
             const endpoint = this.getNextEndpoint();
-            elizaLogger.debug(`Connecting to Polkadot at ${endpoint}`);
+            logger.debug(`Connecting to Polkadot at ${endpoint}`);
 
             this.provider = new WsProvider(endpoint);
             this.api = await ApiPromise.create({ provider: this.provider });
 
-            elizaLogger.debug(`Connected to Polkadot at ${endpoint}`);
+            logger.debug(`Connected to Polkadot at ${endpoint}`);
             return this.api;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            elizaLogger.error(`Polkadot connection error: ${message}`);
+            logger.error(`Polkadot connection error: ${message}`);
 
             if (retryCount < this.networkConfig.MAX_RETRIES) {
                 const delay = this.networkConfig.RETRY_DELAY * 2 ** retryCount;
-                elizaLogger.debug(`Retrying connection in ${delay}ms...`);
+                logger.debug(`Retrying connection in ${delay}ms...`);
 
                 await new Promise((resolve) => setTimeout(resolve, delay));
                 return this.connectWithRetry(retryCount + 1);
@@ -130,7 +130,7 @@ export class PolkadotApiService extends Service {
             ...this.networkConfig.BACKUP_ENDPOINTS,
         ];
         this.lastEndpointIndex = this.lastEndpointIndex % allEndpoints.length;
-        elizaLogger.debug(`Next endpoint: ${allEndpoints[this.lastEndpointIndex]}`);
+        logger.debug(`Next endpoint: ${allEndpoints[this.lastEndpointIndex]}`);
         return allEndpoints[this.lastEndpointIndex];
     }
 
@@ -197,7 +197,7 @@ export class PolkadotApiService extends Service {
 
             // Reset the endpoint index
             this.lastEndpointIndex = 0;
-            elizaLogger.debug(`Updated Polkadot API endpoints: ${endpoints.join(', ')}`);
+            logger.debug(`Updated Polkadot API endpoints: ${endpoints.join(', ')}`);
         }
     }
 }

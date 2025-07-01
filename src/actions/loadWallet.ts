@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import { z } from 'zod';
 
@@ -66,12 +61,12 @@ export async function buildLoadWalletDetails(
         template: loadWalletTemplate,
     });
 
-    const parsedResponse: LoadWalletContent | null = null;
+    let parsedResponse: LoadWalletContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(response) as LoadWalletContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as LoadWalletContent | null;
         if (parsedResponse) {
             break;
         }
@@ -99,7 +94,7 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting LOAD_POLKADOT_WALLET action...');
+        logger.log('Starting LOAD_POLKADOT_WALLET action...');
 
         const loadWalletContent = await buildLoadWalletDetails(runtime, message, state);
 
@@ -116,7 +111,7 @@ export default {
         }
 
         try {
-            elizaLogger.debug('loadWalletContent', loadWalletContent);
+            logger.debug('loadWalletContent', loadWalletContent);
             const { walletNumber, walletAddress, walletPassword } = loadWalletContent;
 
             // Initialize the wallet provider
@@ -177,7 +172,7 @@ export default {
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error loading wallet:', error);
+            logger.error('Error loading wallet:', error);
             if (callback) {
                 callback({
                     text: `Error loading wallet: ${error.message}`,

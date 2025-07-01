@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { z } from 'zod';
 import { PolkadotApiService } from '../services/api-service';
 
@@ -65,18 +60,22 @@ export async function buildGetBlockInfoDetails(
         template: blockInfoTemplate,
     });
 
-    const parsedResponse: GetBlockInfoContent | null = null;
+    let parsedResponse: GetBlockInfoContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(response) as GetBlockInfoContent | null;
+
+        logger.info(response);
+        parsedResponse = parseJSONObjectFromText(response) as GetBlockInfoContent;
         if (parsedResponse) {
             break;
         }
     }
 
-    //zod validate the response
+    logger.info(parsedResponse);
+
+    // Validate the response against the schema
     const validatedResponse = blockInfoSchema.safeParse(parsedResponse);
 
     if (!validatedResponse.success) {
@@ -177,7 +176,7 @@ export class GetBlockInfoAction {
 
             return blockInfo;
         } catch (error) {
-            elizaLogger.error(`Error fetching block info for ${params.blockNumberOrHash}:`, error);
+            logger.error(`Error fetching block info for ${params.blockNumberOrHash}:`, error);
             throw new Error(`Failed to retrieve block info: ${(error as Error).message}`);
         }
     }
@@ -194,15 +193,15 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting GET_BLOCK_INFO action...');
+        logger.log('Starting GET_BLOCK_INFO action...');
 
         try {
             const getBlockInfoContent = await buildGetBlockInfoDetails(runtime, message, state);
 
-            elizaLogger.debug('getBlockInfoContent', getBlockInfoContent);
+            logger.debug(getBlockInfoContent);
 
             if (!getBlockInfoContent || typeof getBlockInfoContent.blockNumberOrHash !== 'string') {
-                elizaLogger.error('Failed to obtain a valid block number or hash.');
+                logger.error('Failed to obtain a valid block number or hash.');
                 if (callback) {
                     callback({
                         text: "I couldn't process your block info request. Please provide a valid block number or hash.",
@@ -265,7 +264,7 @@ Block Content:
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error retrieving block info:', error);
+            logger.error('Error retrieving block info:', error);
             if (callback) {
                 callback({
                     text: `Error retrieving block info: ${(error as Error).message}`,

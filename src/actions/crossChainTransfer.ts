@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { WalletProvider, initWalletProvider } from '../providers/wallet';
 import type { ApiPromise } from '@polkadot/api';
 import { AssetTransferApi, constructApiPromise } from '@substrate/asset-transfer-api';
@@ -79,14 +74,12 @@ export async function buildCrossChainTransferDetails(
         template: crossChainTransferTemplate,
     });
 
-    const parsedResponse: CrossChainTransferContent | null = null;
+    let parsedResponse: CrossChainTransferContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(
-            response,
-        ) as CrossChainTransferContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as CrossChainTransferContent | null;
         if (parsedResponse) {
             break;
         }
@@ -177,11 +170,11 @@ export class CrossChainTransferAction {
             },
         );
 
-        elizaLogger.debug('Transfer transaction created:', {
+        logger.debug('Transfer transaction created:', {
             callInfoTx: callInfo.tx,
         });
 
-        elizaLogger.log('Attempting to dry run the transaction...');
+        logger.log('Attempting to dry run the transaction...');
         const dryRunResult = await this.assetApi.dryRunCall(
             keypair.address,
             callInfo.tx,
@@ -190,20 +183,20 @@ export class CrossChainTransferAction {
         );
 
         if (dryRunResult === null) {
-            elizaLogger.warn('Dry run did not return a result. Proceeding with caution.');
+            logger.warn('Dry run did not return a result. Proceeding with caution.');
         } else if (dryRunResult.isErr) {
-            elizaLogger.error('Transaction dry run failed:', dryRunResult.asErr.toHuman());
+            logger.error('Transaction dry run failed:', dryRunResult.asErr.toHuman());
             throw new Error(`Transaction dry run failed: ${dryRunResult.asErr.toString()}`);
         } else {
-            elizaLogger.log('Transaction dry run successful:', dryRunResult.asOk.toHuman());
+            logger.log('Transaction dry run successful:', dryRunResult.asOk.toHuman());
         }
 
         let decodedTxString: string | undefined = undefined;
         try {
             decodedTxString = this.assetApi.decodeExtrinsic(callInfo.tx, 'call');
-            elizaLogger.debug('Decoded transaction:', JSON.parse(decodedTxString));
+            logger.debug('Decoded transaction:', JSON.parse(decodedTxString));
         } catch (decodeError) {
-            elizaLogger.warn('Failed to decode transaction:', decodeError);
+            logger.warn('Failed to decode transaction:', decodeError);
         }
 
         if (dryRun) {
@@ -225,7 +218,7 @@ export class CrossChainTransferAction {
                 },
             );
 
-        elizaLogger.log('Signing and sending the transaction...');
+        logger.log('Signing and sending the transaction...');
         let hash: string | undefined = undefined;
         const unsub = await submitableTransaction.tx.signAndSend(keypair, (result) => {
             console.log(`Current status is ${result.status}`);
@@ -261,12 +254,12 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting CROSS_CHAIN_TRANSFER action...');
+        logger.log('Starting CROSS_CHAIN_TRANSFER action...');
 
         // Build transfer details using the object building approach
         const transferContent = await buildCrossChainTransferDetails(runtime, message, state);
 
-        elizaLogger.debug('crossChainTransferContent', transferContent);
+        logger.debug('crossChainTransferContent', transferContent);
 
         if (
             !transferContent ||
@@ -274,7 +267,7 @@ export default {
             !transferContent.amount ||
             !transferContent.destinationChain
         ) {
-            elizaLogger.error('Failed to obtain required transfer details.');
+            logger.error('Failed to obtain required transfer details.');
             if (callback) {
                 callback({
                     text: 'Unable to process cross-chain transfer request. Could not obtain required details.',
@@ -316,7 +309,7 @@ export default {
 
             return true;
         } catch (error) {
-            elizaLogger.error('Error in cross-chain transfer:', error);
+            logger.error('Error in cross-chain transfer:', error);
             if (callback) {
                 callback({
                     text: `Error in cross-chain transfer: ${error.message}`,

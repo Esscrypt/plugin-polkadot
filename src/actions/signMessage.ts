@@ -1,10 +1,5 @@
 import type { IAgentRuntime, Memory, State, HandlerCallback, Content } from '@elizaos/core';
-import {
-    elizaLogger,
-    ModelType,
-    composePromptFromState,
-    parseJSONObjectFromText,
-} from '@elizaos/core';
+import { logger, ModelType, composePromptFromState, parseJSONObjectFromText } from '@elizaos/core';
 import { WalletProvider, initWalletProvider, WALLET_CACHE_KEY } from '../providers/wallet';
 import { stringToU8a, u8aToHex } from '@polkadot/util'; // For message and signature conversion
 import { z } from 'zod';
@@ -69,12 +64,12 @@ export async function buildSignMessageDetails(
         template: signMessageTemplate,
     });
 
-    const parsedResponse: SignMessageContent | null = null;
+    let parsedResponse: SignMessageContent | null = null;
     for (let i = 0; i < 5; i++) {
         const response = await runtime.useModel(ModelType.TEXT_SMALL, {
             prompt,
         });
-        const parsedResponse = parseJSONObjectFromText(response) as SignMessageContent | null;
+        parsedResponse = parseJSONObjectFromText(response) as SignMessageContent | null;
         if (parsedResponse) {
             break;
         }
@@ -177,7 +172,7 @@ export default {
         _options: Record<string, unknown>,
         callback?: HandlerCallback,
     ) => {
-        elizaLogger.log('Starting SIGN_POLKADOT_MESSAGE action...');
+        logger.log('Starting SIGN_POLKADOT_MESSAGE action...');
 
         const signMessageContent = await buildSignMessageDetails(runtime, message, state);
 
@@ -194,7 +189,7 @@ export default {
         }
 
         try {
-            elizaLogger.debug('signMessageContent', signMessageContent);
+            logger.debug('signMessageContent', signMessageContent);
             const { messageToSign, walletNumber, walletAddress } = signMessageContent;
 
             // Initialize the wallet provider
@@ -217,7 +212,7 @@ export default {
             return true;
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            elizaLogger.error('Error signing message:', errorMessage);
+            logger.error('Error signing message:', errorMessage);
             if (callback) {
                 callback({
                     text: `Error signing message: ${errorMessage}`,
